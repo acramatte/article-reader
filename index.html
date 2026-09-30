@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Article Reader</title>
+  <style>
+    :root { color-scheme: light; font: 16px system-ui, sans-serif; color: #172c31; background: #f3f6f5; }
+    * { box-sizing: border-box; }
+    body { max-width: 860px; margin: 32px auto; padding: 0 20px; }
+    h1 { margin-bottom: 8px; }
+    .intro, #byline { color: #53676b; }
+    section, form { padding: 20px; margin: 20px 0; border: 1px solid #d2dfdb; border-radius: 12px; background: white; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input, textarea, select, button { font: inherit; }
+    input, textarea { width: 100%; padding: 10px; border: 1px solid #93a7a1; border-radius: 6px; }
+    textarea { min-height: 260px; line-height: 1.6; resize: vertical; }
+    button, select { min-height: 44px; padding: 9px 14px; border-radius: 6px; border: 1px solid #93a7a1; }
+    button { background: #126b59; color: white; cursor: pointer; }
+    button.secondary { background: white; color: #172c31; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    :focus-visible { outline: 3px solid #e59a31; outline-offset: 3px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin-top: 12px; }
+    .row > div { flex: 1 1 140px; }
+    select { width: 100%; background: white; }
+    #status { font-weight: 600; overflow-wrap: anywhere; }
+    dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 0; }
+    dt { font-size: 0.8rem; color: #53676b; }
+    dd { margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+    #source { overflow-wrap: anywhere; color: #126b59; }
+    #article-title { margin-top: 0; }
+    .hint { font-size: 0.85rem; color: #53676b; }
+    @media (max-width: 520px) { body { margin: 20px auto; padding: 0 12px; } section, form { padding: 16px; } dl { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <h1>Article Reader</h1>
+  <p class="intro">A webpage, a clean article, a voice. Narrated by Kokoro on the backend.</p>
+  <form id="url-form">
+    <label for="url">Webpage URL</label>
+    <input id="url" type="url" placeholder="https://example.com/article" required />
+    <div class="row"><button id="read-url" type="submit">Read article</button></div>
+    <p class="hint">Fetches and extracts the article, then starts narration. Some JavaScript-heavy or paywalled pages need pasted text instead.</p>
+  </form>
+  <section aria-label="Narration">
+    <div class="row">
+      <div><label for="voice">Voice</label><select id="voice"><option value="af_heart">Heart</option><option value="af_bella">Bella</option><option value="af_nicole">Nicole</option></select></div>
+      <div><label for="speed">Narration speed</label><select id="speed"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.2">1.2×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></div>
+    </div>
+    <div class="row"><button id="pause" class="secondary" disabled>Pause</button><button id="stop" class="secondary" disabled>Stop</button></div>
+    <p id="status" role="status" aria-live="polite">Ready. Enter a URL or paste text below.</p>
+    <dl>
+      <div><dt>Audio buffered</dt><dd id="buffer">0.0 s</dd></div>
+      <div><dt>Chunks played</dt><dd id="progress">0 / 0</dd></div>
+      <div><dt>First audio scheduled</dt><dd id="first-audio">—</dd></div>
+      <div><dt>Buffer underruns</dt><dd id="underruns">0</dd></div>
+    </dl>
+    <p class="hint">Starts with a small chunk, then buffers about 45 seconds ahead. Keep this tab open while listening.</p>
+  </section>
+  <section aria-label="Article text">
+    <h2 id="article-title">Article text</h2>
+    <p id="byline"></p>
+    <p><a id="source" target="_blank" rel="noopener noreferrer"></a></p>
+    <label for="text">Extracted or pasted text</label>
+    <textarea id="text" placeholder="Paste an article here, or enter a URL above."></textarea>
+    <div class="row"><button id="read-text" type="button">Read text</button></div>
+    <p class="hint">Stop playback to edit the text, change voice, or read another article. Voices are English in this first version.</p>
+  </section>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

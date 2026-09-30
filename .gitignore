@@ -1,0 +1,9 @@
+node_modules/
+dist/
+kokoro-service/.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+tts-playwright/
+playwright-report/
