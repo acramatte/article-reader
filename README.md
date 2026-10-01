@@ -27,6 +27,10 @@ A future hosted service must accept the current `{text, voice, speed}` JSON and 
 
 `npm run build` then `npm start` serves the built UI and API from the app backend. For another device, bind with `HOST=0.0.0.0` and put it behind an **HTTPS** reverse proxy before exposing it beyond your trusted network. The TTS server can stay on loopback; Android does not need a Python service on the phone. The backend has no user auth, rate limiting or concurrency admission control yet: do not deploy it publicly as-is. URLs, article text, and generated audio are not stored by the app.
 
+## Container / WireGuard deployment
+
+The multi-stage `Dockerfile` bundles the production frontend and Node crawler/API only; inference stays external. `compose.yaml` binds the reader to `10.0.0.1:8084` by default, separately from existing services, and opts into the existing Watchtower via its enable label. See [docs/deployment.md](docs/deployment.md) for required image/endpoint configuration, server-only credentials, VPN/firewall and HTTPS checks, local container smoke tests, and remaining deployment gates. No registry image or HF endpoint has been provisioned by these files.
+
 ## Extraction limits
 
 HTTP/HTTPS only, standard ports, no credentials. Every URL/redirect is checked against all DNS results, and the selected public IP is pinned to the socket to avoid DNS rebinding. Private/loopback/link-local/reserved IPs are blocked. Fetching has a 15-second deadline, five-redirect limit, and 3 MB HTML body limit. HTML scripts/resources are not executed. UTF-8 HTML is currently assumed. Articles are limited to 100,000 characters. Provider failures and JS-heavy/paywalled pages are reported; paste text to continue. Readability reduces noise but cannot guarantee removal of every inline ad or consent banner.

@@ -1,0 +1,50 @@
+name: Container
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.0'
+          cache: npm
+      - name: Test application
+        run: |
+          npm ci --include=dev
+          npm test
+          npm run build
+      - name: Build and smoke-test image
+        run: |
+          docker build --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" --label "org.opencontainers.image.revision=${GITHUB_SHA}" -t article-reader:ci .
+          node scripts/smoke-container.mjs article-reader:ci
+      - name: Publish GHCR image
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          docker tag article-reader:ci "$image:sha-$GITHUB_SHA"
+          docker tag article-reader:ci "$image:stable"
+          docker push "$image:sha-$GITHUB_SHA"
+          docker push "$image:stable"

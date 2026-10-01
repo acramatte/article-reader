@@ -1,0 +1,12 @@
+# Allowlist: never send credentials, Python models, or local environments to the builder.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!index.html
+!main.js
+!narrator.mjs
+!chunks.mjs
+!vite.config.js
+!server.mjs
+!article.mjs

@@ -1,0 +1,33 @@
+name: article-reader
+services:
+  reader:
+    image: ${READER_IMAGE:?Set READER_IMAGE to the published reader image}
+    restart: unless-stopped
+    init: true
+    ports:
+      # Bind only the VPS WireGuard address, never 0.0.0.0.
+      - "10.0.0.1:${READER_PORT:-8084}:3001"
+    env_file:
+      - ${READER_INFERENCE_ENV_FILE:-/etc/article-reader/inference.env}
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3001"
+      NODE_ENV: production
+      TTS_URL: ${TTS_URL:?Set TTS_URL to the HF Protected HTTPS synthesis endpoint}
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
