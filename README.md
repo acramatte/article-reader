@@ -5,6 +5,10 @@ Kokoro Article Reader
 
 Turn an online article into something you can listen to. Paste a link, choose a voice and speed, and start playback. The reader pulls out the article text and reads it aloud, with pause, resume and stop controls. You can also paste text directly.
 
+<p align="center">
+  <img src="docs/demo/article-reader-mobile.gif" width="390" alt="Article Reader phone-sized demo: paste a URL, start narration, pause and resume, scroll the extracted article, and stop playback." />
+</p>
+
 ## Why it exists
 
 The goal is hands-free listening to online articles. Being able to consume them while walking, cooking, at the gym, touching grass, or doing something other than looking at a screen. Existing operating system and phone read-aloud tools still make the journey from a web page to a comfortable and continuous listening more cumbersome than it should be. This project explores a simpler, dedicated reader built around that flow.
