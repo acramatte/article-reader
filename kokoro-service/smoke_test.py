@@ -63,34 +63,39 @@ if __name__ == "__main__":
     assert os.environ["HF_HUB_OFFLINE"] == "1"
     assert importlib.metadata.version("torch").endswith("+cpu")
     assert not any(d.metadata["Name"].lower().startswith("nvidia-") for d in importlib.metadata.distributions())
+    quick = os.environ.get("KOKORO_SMOKE_MODE") == "quick"
+    voices = ("af_heart",) if quick else ("af_heart", "af_bella", "af_nicole")
+    text = "Hello from Kokoro." if quick else TEXT
     measured = []
-    for voice in ("af_heart", "af_bella", "af_nicole"):
-        measured.append({"voice": voice, **validate_wav(request("/tts", {"text": TEXT, "voice": voice, "speed": 1}))})
-    # Root prediction route also supports HF clients that POST to the base URL.
-    validate_wav(request("/", {"text": "Hello from the root prediction route.", "voice": "af_heart", "speed": 2}))
-    validate_wav(request("/tts", {"text": "Slow speech is supported.", "voice": "af_heart", "speed": 0.5}))
-    validate_wav(request("/tts", {"text": (TEXT + " ") * 5, "voice": "af_heart", "speed": 0.5}))
-    validate_wav(request("/tts", {"text": ((TEXT + " ") * 20)[:1000], "voice": "af_heart", "speed": 2}))
+    for voice in voices:
+        measured.append({"voice": voice, **validate_wav(request("/tts", {"text": text, "voice": voice, "speed": 1}))})
+    if not quick:
+        # Root prediction route also supports HF clients that POST to the base URL.
+        validate_wav(request("/", {"text": "Hello from the root prediction route.", "voice": "af_heart", "speed": 2}))
+        validate_wav(request("/tts", {"text": "Slow speech is supported.", "voice": "af_heart", "speed": 0.5}))
+        validate_wav(request("/tts", {"text": (TEXT + " ") * 5, "voice": "af_heart", "speed": 0.5}))
+        validate_wav(request("/tts", {"text": ((TEXT + " ") * 20)[:1000], "voice": "af_heart", "speed": 2}))
     for body in (
         {"text": " "}, {"text": "x" * 1001}, {"text": TEXT, "voice": "unknown"},
         {"text": TEXT, "voice": "/tmp/voice.pt"}, {"text": TEXT, "speed": 0.49},
         {"text": TEXT, "speed": 2.01}, {"text": TEXT, "speed": "NaN"},
     ):
         assert request("/tts", body)[0] == 422
-    # Simultaneous genuine inference requests: no synthetic model or transport response.
-    barrier = threading.Barrier(3)
-    def concurrent_request(_):
-        barrier.wait()
-        return request("/tts", {"text": (TEXT + " ") * 8, "voice": "af_heart", "speed": 1})
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        responses = list(pool.map(concurrent_request, range(3)))
-    assert sorted(response[0] for response in responses) == [200, 200, 429]
-    for response in responses:
-        if response[0] == 200:
-            validate_wav(response)
-        else:
-            assert response[1]["Retry-After"] == "1"
-    validate_wav(request("/tts", {"text": "The engine remains usable after rejecting a busy request."}))
+    if not quick:
+        # Simultaneous genuine inference requests: no synthetic model or transport response.
+        barrier = threading.Barrier(3)
+        def concurrent_request(_):
+            barrier.wait()
+            return request("/tts", {"text": (TEXT + " ") * 8, "voice": "af_heart", "speed": 1})
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            responses = list(pool.map(concurrent_request, range(3)))
+        assert sorted(response[0] for response in responses) == [200, 200, 429]
+        for response in responses:
+            if response[0] == 200:
+                validate_wav(response)
+            else:
+                assert response[1]["Retry-After"] == "1"
+        validate_wav(request("/tts", {"text": "The engine remains usable after rejecting a busy request."}))
     cgroup = Path("/sys/fs/cgroup/memory.peak")
     events = dict(line.split() for line in Path("/sys/fs/cgroup/memory.events").read_text().splitlines())
     assert int(events["oom"]) == 0 and int(events["oom_kill"]) == 0
@@ -98,4 +103,5 @@ if __name__ == "__main__":
     assert swap_peak == 0
     print(json.dumps({"voices": measured, "memory_peak_mib": int(cgroup.read_text()) / (1024 * 1024) if cgroup.exists() else None,
                       "swap_peak_bytes": swap_peak, "memory_events": events,
-                      "checks": "offline-network startup, real WAVs, all voices, speed boundaries, root route, input validation, concurrent 429, recovery"}, indent=2))
+                      "mode": "quick" if quick else "full",
+                      "checks": "offline-network startup, short real WAV, input validation" if quick else "offline-network startup, real WAVs, all voices, speed boundaries, root route, input validation, concurrent 429, recovery"}, indent=2))

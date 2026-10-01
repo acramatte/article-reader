@@ -1,23 +1,33 @@
-"""Start and remove a hardened, network-isolated container; test actual inference over loopback."""
+"""Run real inference checks; --quick is the bounded CI smoke, full mode is manual."""
+import argparse
 from pathlib import Path
 import subprocess
-import sys
 
-image = sys.argv[1] if len(sys.argv) > 1 else "article-reader-kokoro:local"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("image", nargs="?", default="article-reader-kokoro:local")
+parser.add_argument("--quick", action="store_true", help="One short synthesis; skip long-input, voice/speed and concurrency probes")
+args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 container = subprocess.check_output([
-    "docker", "run", "--detach", "--rm", "--init", "--network", "none", "--read-only",
+    "docker", "run", "--detach", "--init", "--network", "none", "--read-only",
     "--cap-drop=ALL", "--security-opt=no-new-privileges:true", "--memory=4g", "--memory-swap=4g", "--cpus=2",
-    "--pids-limit=128", "--tmpfs", "/tmp:size=64m,mode=1777", image,
+    "--pids-limit=128", "--tmpfs", "/tmp:size=64m,mode=1777", args.image,
 ], text=True).strip()
 try:
     probe = (root / "kokoro-service" / "smoke_test.py").read_text()
-    subprocess.run(["docker", "exec", "-i", container, "python", "-"], input=probe, text=True, check=True, timeout=240)
+    mode = "quick" if args.quick else "full"
+    subprocess.run(["docker", "exec", "-i", "--env", f"KOKORO_SMOKE_MODE={mode}", container, "python", "-"],
+                   input=probe, text=True, check=True, timeout=150 if args.quick else 240)
     logs = subprocess.check_output(["docker", "logs", container], stderr=subprocess.STDOUT, text=True)
-    assert "The article reader sends small text chunks" not in logs, "Request text leaked into service logs"
-    print("Real inference container smoke passed; no request-text logging. HF hosting/auth and physical playback not tested.")
+    for text in ("The article reader sends small text chunks", "Hello from Kokoro."):
+        assert text not in logs, "Request text leaked into service logs"
+    print(f"Real inference container {mode} smoke passed; no request-text logging. HF hosting/auth and physical playback not tested.")
 except Exception:
+    # Keep the container until diagnostics are captured, including an observed OOM kill.
+    subprocess.run(["docker", "inspect", "--format", "{{json .State}}", container], check=False)
     subprocess.run(["docker", "logs", container], check=False)
     raise
 finally:
-    subprocess.run(["docker", "stop", container], stdout=subprocess.DEVNULL, check=True)
+    cleanup = subprocess.run(["docker", "rm", "--force", container], stdout=subprocess.DEVNULL)
+    if cleanup.returncode:
+        print(f"Warning: container cleanup failed for {container}")

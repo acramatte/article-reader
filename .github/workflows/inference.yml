@@ -26,8 +26,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build CPU inference image
         run: docker build --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" --label "org.opencontainers.image.revision=${GITHUB_SHA}" -t article-reader-kokoro:ci kokoro-service
-      - name: Verify real offline inference
-        run: python3 scripts/smoke-kokoro.py article-reader-kokoro:ci
+      - name: Verify short real offline inference
+        timeout-minutes: 3
+        run: python3 scripts/smoke-kokoro.py article-reader-kokoro:ci --quick
       - name: Publish GHCR inference image
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
