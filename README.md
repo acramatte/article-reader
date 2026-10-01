@@ -21,7 +21,7 @@ Both browser API requests are same-origin. Vite proxies `/api` to the app backen
 - `PORT`: app backend port; defaults to 3001.
 - `HOST`: app backend bind address; defaults to 127.0.0.1.
 
-A future hosted service must accept the current `{text, voice, speed}` JSON and return `audio/wav`. HF custom-container deployment is not included yet.
+Hosted inference must accept the current `{text, voice, speed}` JSON and return `audio/wav`. The separate CPU-only inference image and HF custom-container configuration are documented in [docs/hf-inference.md](docs/hf-inference.md); it is not HF's default Transformers runtime.
 
 ## Production / phone testing
 
