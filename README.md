@@ -1,12 +1,15 @@
-# Article Reader + Kokoro
+<h1 align="center">
+Kokoro Article Reader
+</h1>
+
 
 Turn an online article into something you can listen to. Paste a link, choose a voice and speed, and start playback. The reader pulls out the article text and reads it aloud, with pause, resume and stop controls. You can also paste text directly.
 
 ## Why it exists
 
-The goal is hands-free listening to online articles: catching up while walking, cooking or doing something other than looking at a screen. Built-in operating-system and phone read-aloud tools aren't there yet for this workflow—getting from a web page to comfortable, continuous listening still takes too much friction. This project explores a simpler, dedicated reader.
+The goal is hands-free listening to online articles. Being able to consume them while walking, cooking, at the gym, touching grass, or doing something other than looking at a screen. Existing operating system and phone read-aloud tools still make the journey from a web page to a comfortable and continuous listening more cumbersome than it should be. This project explores a simpler, dedicated reader built around that flow.
 
-It's still an early version, not a finished podcast-style player. Keep the tab open: reliable mobile background playback and lock-screen controls are not implemented yet. A local-only, on-device model is also being considered; today, speech generation runs in a separate service, which you can host locally or remotely.
+It's still an early version, not a finished podcast player. Keep the tab open: reliable mobile background playback and lock-screen controls are not implemented yet. A local-only, on-device model is also being considered. However, today, speech generation runs in a separate service that you can host locally or remotely.
 
 ## Run it yourself
 
@@ -40,9 +43,7 @@ Open **http://127.0.0.1:3001**, paste a link and click **Read**. Narration start
 
 The Listen card provides **Read again**, **Pause/Resume** and **Stop**. After stopping, use **Edit article text** to make changes; **Read again** generates fresh narration from that text without fetching the URL again. Voice/speed settings and buffer diagnostics are collapsible. English voices currently available: Heart, Bella and Nicole. Voice and synthesis speed are fixed for each listening session.
 
-### Hosting and phone access
-
-To use the reader from a phone, run it on a computer or server the phone can reach. Bind the app with `HOST=0.0.0.0 npm start` and use an **HTTPS reverse proxy** for access beyond your trusted network. The phone only needs a browser; it doesn't run the speech service.
+### Hosting
 
 **Do not expose the app publicly as-is.** The reader backend has no user authentication, rate limiting or concurrency admission control. Keep it behind a VPN or another access-control layer, and keep local inference bound to loopback.
 
@@ -107,16 +108,6 @@ The browser suite starts dedicated servers on UI port 5197 and backend port 3017
 
 Tests require local Kokoro and internet access to `https://www.paulgraham.com/greatwork.html` for real article/audio checks. They cover scheduling, playback controls, completion, URL-first layout, extraction errors, manual fallback, editing/re-reading without re-extraction, keyboard access and responsive/reduced-motion behavior. Some article/startup fixtures and the TTS error path are deliberately synthetic; playback checks retain real Kokoro audio. Headless checks don't establish narration quality or reliable background playback on physical phones.
 
-### Independent UI preview
-
-For a preview alongside other worktrees, build the UI and run `PORT=5187 HOST=127.0.0.1 npm start`. For hot reload, use separate terminals:
-
-```sh
-PORT=3017 npm run backend
-READER_BACKEND_PORT=3017 npm run dev -- --host 127.0.0.1 --port 5187 --strictPort
-```
-
-Open **http://127.0.0.1:5187** with Kokoro running on port 8000. Stop the preview backend before browser tests, or choose a different test backend port. For worktree-local caches, create `.ui-review/tmp` and run `TMPDIR="$PWD/.ui-review/tmp" npm run test:browser`.
 
 ## Current limits
 
@@ -124,5 +115,6 @@ Open **http://127.0.0.1:5187** with Kokoro running on port 8000. Stop the previe
 - Extraction accepts public HTTP/HTTPS URLs on standard ports, without URL credentials. Private, loopback, link-local and reserved addresses are blocked, including redirects; DNS results are checked and the selected public IP is pinned to the connection.
 - Fetches have a 15-second deadline, five-redirect limit and 3 MB HTML limit. Scripts are not executed, UTF-8 HTML is assumed, and article text is limited to 100,000 characters.
 - No seeking, saved articles, offline reader mode, media-session integration or guaranteed mobile background playback yet.
+- The inference server needs to be dimensioned according to usage. Concurrent listening is limited by the speech service’s compute capacity and request queue. Altough the model is shared per inference worker, not loaded separately for each user.
 
 The old browser-inference experiment in `main_.js` is not loaded by the app. Its unused `kokoro-js` dependency was removed; revisiting it requires installing that dependency separately.
