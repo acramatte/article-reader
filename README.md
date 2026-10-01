@@ -1,75 +1,128 @@
 # Article Reader + Kokoro
 
-A first vertical slice: URL → server-side Mozilla Readability → paragraph/sentence chunks → Kokoro WAV → scheduled browser audio. The first chunk is capped at 220 characters; subsequent chunks at 500. The player schedules decoded audio on the Web Audio clock with a 45-second look-ahead target (it can overshoot by one chunk), rather than switching separate audio players at chunk boundaries.
+Turn an online article into something you can listen to. Paste a link, choose a voice and speed, and start playback. The reader pulls out the article text and reads it aloud, with pause, resume and stop controls. You can also paste text directly.
 
-## Development
+## Why it exists
 
-Node 24 and the existing Python 3.12 Kokoro environment are used here.
+The goal is hands-free listening to online articles: catching up while walking, cooking or doing something other than looking at a screen. Built-in operating-system and phone read-aloud tools aren't there yet for this workflow—getting from a web page to comfortable, continuous listening still takes too much friction. This project explores a simpler, dedicated reader.
 
-1. `npm install --include=dev` (this machine's npm configuration omits dev dependencies by default).
-2. Start the existing service from `kokoro-service`: `.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000`.
-3. In the project root, `npm run backend` (127.0.0.1:3001).
-4. In another terminal, `npm run dev`.
-5. Open http://localhost:5173. Paste a webpage URL into the large landing field and choose **Read article**. Extraction starts narration automatically, smoothly brings the URL area toward the top, and reveals the retrieved article. Reduced-motion users get the same layout immediately. **Paste text instead** is a secondary fallback, highlighted after extraction errors; the editor is not shown initially. Retrieved content can be edited through **Edit article text** after stopping.
+It's still an early version, not a finished podcast-style player. Keep the tab open: reliable mobile background playback and lock-screen controls are not implemented yet. A local-only, on-device model is also being considered; today, speech generation runs in a separate service, which you can host locally or remotely.
 
-The compact Listen card groups **Read again**, **Pause/Resume** and **Stop**. After Stop or completion, **Read again** starts the current editor text from the beginning with newly generated audio, without fetching the URL again. **Read article** by the URL field explicitly fetches a page. Voice/speed and buffer diagnostics are collapsible.
+## Run it yourself
 
-Both browser API requests are same-origin. Vite proxies `/api` to the app backend. The browser never calls the Python service directly and never receives a model-provider token. Pause freezes the audio clock and stops new synthesis requests; one in-flight request may complete. Stop aborts fetches, drops pending audio and closes the audio context. Cancelling an HTTP request cannot interrupt Python inference that has already started.
+You'll need **Node 24** and **Docker** for the local setup below. Run these commands from the project root. The first inference-image build downloads the model and its dependencies; the resulting speech service runs on CPU without runtime model downloads or an HF token.
 
-## Backend configuration
-
-- `TTS_URL`: full WAV synthesis endpoint; defaults to `http://127.0.0.1:8000/tts`.
-- `TTS_TOKEN`: optional server-side Bearer token, never a `VITE_*` variable.
-- `PORT`: app backend port; defaults to 3001.
-- `HOST`: app backend bind address; defaults to 127.0.0.1.
-
-Hosted inference must accept the current `{text, voice, speed}` JSON and return `audio/wav`. The separate CPU-only inference image and HF custom-container configuration are documented in [docs/hf-inference.md](docs/hf-inference.md); it is not HF's default Transformers runtime.
-
-## Production / phone testing
-
-`npm run build` then `npm start` serves the built UI and API from the app backend. For another device, bind with `HOST=0.0.0.0` and put it behind an **HTTPS** reverse proxy before exposing it beyond your trusted network. The TTS server can stay on loopback; Android does not need a Python service on the phone. The backend has no user auth, rate limiting or concurrency admission control yet: do not deploy it publicly as-is. URLs, article text, and generated audio are not stored by the app.
-
-## Container / WireGuard deployment
-
-The multi-stage `Dockerfile` bundles the production frontend and Node crawler/API only; inference stays external. `compose.yaml` binds the reader to `10.0.0.1:8084` by default, separately from existing services, and opts into the existing Watchtower via its enable label. See [docs/deployment.md](docs/deployment.md) for required image/endpoint configuration, server-only credentials, VPN/firewall and HTTPS checks, local container smoke tests, and remaining deployment gates. No registry image or HF endpoint has been provisioned by these files.
-
-## Extraction limits
-
-HTTP/HTTPS only, standard ports, no credentials. Every URL/redirect is checked against all DNS results, and the selected public IP is pinned to the socket to avoid DNS rebinding. Private/loopback/link-local/reserved IPs are blocked. Fetching has a 15-second deadline, five-redirect limit, and 3 MB HTML body limit. HTML scripts/resources are not executed. UTF-8 HTML is currently assumed. Articles are limited to 100,000 characters. Provider failures and JS-heavy/paywalled pages are reported; paste text to continue. Readability reduces noise but cannot guarantee removal of every inline ad or consent banner.
-
-English voices: Heart, Bella, Nicole. Voice and synthesis speed are fixed for each listening session. No headless-browser fallback, Web Speech mode, seek, persisted articles, offline mode, media-session integration or guaranteed mobile background playback yet. Keep the tab open; physical Android and macOS testing is still needed.
-
-## Verification
-
-- `npm test`: extraction, SSRF/redirect validation, socket limits, chunking, API behavior, scheduling, backpressure, pause, cancellation and cleanup.
-- `npm run build`: production bundle.
-- `npx playwright install chromium` then `npm run test:browser`: real public article + **real local Kokoro** + Web Audio playback, buffer continuity, pause/resume/stop, 390px mobile layout and natural completion. Requires the Python service and external access to `https://www.paulgraham.com/greatwork.html`; the test runner starts the app backend and Vite when necessary. The error-path test intentionally simulates a TTS failure, not a successful audio response. Traces/screenshots are stored under `.ui-review/playwright/` in this worktree. Headless browser playback verifies non-silent samples and scheduling, not human-perceived narration quality.
-
-### Independent UI review (this worktree)
-
-Production preview from this worktree:
+### 1. Start the speech service
 
 ```sh
-npm run build
-PORT=5187 HOST=127.0.0.1 npm start
+docker build -t article-reader-kokoro:local kokoro-service
+docker run --rm --name article-reader-kokoro \
+  -p 127.0.0.1:8000:8000 article-reader-kokoro:local
 ```
 
-For hot-reload development instead, stop the production preview and use two terminals:
+Leave this terminal running. In another terminal, check readiness:
+
+```sh
+curl --fail http://127.0.0.1:8000/health
+```
+
+Model loading takes time; retry the check until it succeeds before starting playback. Allow several GB of memory for inference; 4 GiB has proved tight in local tests, not a guaranteed sizing recommendation.
+
+### 2. Start the reader
+
+```sh
+npm install --include=dev
+npm run build
+npm start
+```
+
+Open **http://127.0.0.1:3001**, paste a link and click **Read article**. Narration starts automatically and the extracted article appears below. If extraction fails, choose **Paste text instead**.
+
+The Listen card provides **Read again**, **Pause/Resume** and **Stop**. After stopping, use **Edit article text** to make changes; **Read again** generates fresh narration from that text without fetching the URL again. Voice/speed settings and buffer diagnostics are collapsible. English voices currently available: Heart, Bella and Nicole. Voice and synthesis speed are fixed for each listening session.
+
+### Hosting and phone access
+
+To use the reader from a phone, run it on a computer or server the phone can reach. Bind the app with `HOST=0.0.0.0 npm start` and use an **HTTPS reverse proxy** for access beyond your trusted network. The phone only needs a browser; it doesn't run the speech service.
+
+**Do not expose the app publicly as-is.** The reader backend has no user authentication, rate limiting or concurrency admission control. Keep it behind a VPN or another access-control layer, and keep local inference bound to loopback.
+
+For containers, the root `Dockerfile` packages the reader UI and backend only; inference is a separate instance. The supplied `compose.yaml` targets a WireGuard deployment, binding to `10.0.0.1:8084` by default. See [deployment](docs/deployment.md) for image configuration, credentials, HTTPS, firewall and update instructions, or [HF inference](docs/hf-inference.md) to host the speech service on a Hugging Face Protected custom-container endpoint.
+
+## Development and configuration
+
+### Architecture
+
+```mermaid
+flowchart LR
+    Browser["Browser / phone<br/>Player UI"] <-->|"Article text and audio"| Reader["Reader instance<br/>Node API + built UI"]
+    Reader -->|"Fetch article"| Website["Public article website"]
+    Reader <-->|"Text to WAV"| Speech["Speech instance<br/>Kokoro: local or hosted"]
+```
+
+The Node backend extracts article text with Mozilla Readability and proxies speech requests. The browser splits the text into paragraph/sentence chunks and buffers generated audio for continuous playback. The first chunk is capped at 220 characters, later chunks at 500; Web Audio schedules playback with a 45-second look-ahead target, which can overshoot by one chunk.
+
+Browser API calls stay same-origin. Provider credentials remain on the reader backend, never in the browser. The app does not store URLs, article text or generated audio; with remote inference, text is sent to that service.
+
+Pause freezes the audio clock and stops new synthesis requests; one in-flight request may finish. Stop aborts browser fetches and clears playback, but cannot interrupt speech computation already running on the service.
+
+### Development servers
+
+With the speech service above running, start these in separate terminals:
+
+```sh
+npm run backend
+npm run dev
+```
+
+Open **http://localhost:5173**. Vite serves the UI and proxies `/api` to the Node backend at `127.0.0.1:3001`. If you already have a Python 3.12 Kokoro environment, you can use it instead of Docker: from `kokoro-service`, run `.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000`.
+
+### Backend configuration
+
+Set these environment variables on the **Node backend**:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TTS_URL` | `http://127.0.0.1:8000/tts` | Full speech-generation endpoint. |
+| `TTS_TOKEN` | Unset | Optional server-side Bearer token. Never use a `VITE_*` variable for it. |
+| `PORT` | `3001` | Reader backend port. |
+| `HOST` | `127.0.0.1` | Reader backend bind address. |
+
+An external speech endpoint must accept `{text, voice, speed}` JSON and return a complete `audio/wav` response. HF's default Transformers runtime is not a drop-in replacement; use the separate Kokoro image described in [HF inference](docs/hf-inference.md). If you change the backend `PORT` during development, set `READER_BACKEND_PORT` to the same value when starting Vite.
+
+### Tests
+
+```sh
+npm test
+npm run build
+```
+
+Unit/integration tests cover extraction, SSRF and redirect protection, chunking, API behavior, buffering, pause, cancellation and cleanup. For real browser playback tests, keep local Kokoro running, then run:
+
+```sh
+npx playwright install chromium
+npm run test:browser
+```
+
+The browser suite starts dedicated servers on UI port 5197 and backend port 3017; override them with `READER_UI_PORT` and `READER_BACKEND_PORT`. Occupied ports fail rather than reuse another server. Traces and screenshots go to `.ui-review/playwright/`.
+
+Tests require local Kokoro and internet access to `https://www.paulgraham.com/greatwork.html` for real article/audio checks. They cover scheduling, playback controls, completion, URL-first layout, extraction errors, manual fallback, editing/re-reading without re-extraction, keyboard access and responsive/reduced-motion behavior. Some article/startup fixtures and the TTS error path are deliberately synthetic; playback checks retain real Kokoro audio. Headless checks don't establish narration quality or reliable background playback on physical phones.
+
+### Independent UI preview
+
+For a preview alongside other worktrees, build the UI and run `PORT=5187 HOST=127.0.0.1 npm start`. For hot reload, use separate terminals:
 
 ```sh
 PORT=3017 npm run backend
 READER_BACKEND_PORT=3017 npm run dev -- --host 127.0.0.1 --port 5187 --strictPort
 ```
 
-Open http://127.0.0.1:5187. The existing Kokoro endpoint on port 8000 is required for speech; no inference service or backend API was changed.
+Open **http://127.0.0.1:5187** with Kokoro running on port 8000. Stop the preview backend before browser tests, or choose a different test backend port. For worktree-local caches, create `.ui-review/tmp` and run `TMPDIR="$PWD/.ui-review/tmp" npm run test:browser`.
 
-Browser tests use UI 5197 / backend 3017, separate from the production preview on 5187. Override with `READER_UI_PORT` / `READER_BACKEND_PORT` if needed; occupied ports fail rather than reuse another server. For worktree-local transform/browser caches:
+## Current limits
 
-```sh
-mkdir -p .ui-review/tmp
-TMPDIR="$PWD/.ui-review/tmp" npm run test:browser
-```
+- JS-heavy or paywalled pages may not extract; paste text as a fallback. Readability cannot remove every inline ad or consent banner.
+- Extraction accepts public HTTP/HTTPS URLs on standard ports, without URL credentials. Private, loopback, link-local and reserved addresses are blocked, including redirects; DNS results are checked and the selected public IP is pinned to the connection.
+- Fetches have a 15-second deadline, five-redirect limit and 3 MB HTML limit. Scripts are not executed, UTF-8 HTML is assumed, and article text is limited to 100,000 characters.
+- No seeking, saved articles, offline reader mode, media-session integration or guaranteed mobile background playback yet.
 
-Artifacts use `.ui-review/playwright/`. Tests cover URL-first initial state, article reveal only after successful extraction, extraction errors and manual fallback, keyboard/settings access at 1280/390/320px, extraction cancellation, and Stop → Read again (another TTS request, no re-extraction, edited text). The reveal tests measure intermediate URL positions, focus retention, no overflow, and immediate reduced-motion behavior. Their article/startup fixtures are explicitly synthetic; the console playback tests and existing public-URL test retain real Kokoro audio.
-
-The old browser-inference experiment remains in `main_.js`, but is not loaded by the app. Its unused `kokoro-js` dependency was removed from the active app; reinstall it separately if revisiting that experiment.
+The old browser-inference experiment in `main_.js` is not loaded by the app. Its unused `kokoro-js` dependency was removed; revisiting it requires installing that dependency separately.
