@@ -46,7 +46,7 @@
       90% { content: "⠏"; }
     }
     .status-equalizer { display: none; }
-    #status.is-playing .status-equalizer {
+    #status.is-playing .status-equalizer, #status.is-paused .status-equalizer {
       display: inline-flex; align-items: end; gap: 1px; width: 15px; height: 15px;
       margin-inline-start: .35em; color: #126b59; vertical-align: baseline;
     }
@@ -58,6 +58,7 @@
     .status-equalizer span:nth-child(2) { animation: status-levels-b 2300ms step-end infinite; clip-path: inset(4px 0 0); }
     .status-equalizer span:nth-child(3) { animation: status-levels-c 1900ms step-end infinite; clip-path: inset(8px 0 0); }
     .status-equalizer span:nth-child(4) { animation: status-levels-d 2900ms step-end infinite; clip-path: inset(0px 0 0); }
+    #status.is-paused .status-equalizer span { animation: none; clip-path: inset(12px 0 0); }
     /* Independent rhythms and uneven peaks avoid a repeating left-to-right wave. */
     @keyframes status-levels-a {
       0%, 100% { clip-path: inset(12px 0 0); }
@@ -139,8 +140,10 @@
     #editor label { margin-top: 16px; }
     .transport { display: flex; gap: 8px; margin-top: 12px; }
     #read-start { flex: 1; font-weight: 650; }
+    #pause { width: 6.5rem; flex-shrink: 0; }
     #status { margin: 0 0 16px; }
     details { border-top: 1px solid #e3ebe7; padding: 12px 0; }
+    #diagnostics { border-top: 0; }
     summary { cursor: pointer; font-size: 0.9rem; color: #53676b; min-height: 28px; }
     details:last-child { padding-bottom: 0; }
     .hero .settings { grid-area: 1 / 1; min-width: 0; margin: 0; border: 0; padding: 0; text-align: left; }

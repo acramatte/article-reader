@@ -21,7 +21,7 @@ function wav(seconds = 4) {
   return buffer;
 }
 
-for (const width of [1280, 390]) {
+for (const width of [1280, 390, 320]) {
   test(`equalizer animates only during playback, without status mutations: ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.route("**/api/tts", (route) => route.fulfill({ contentType: "audio/wav", body: wav() }));
@@ -81,16 +81,81 @@ for (const width of [1280, 390]) {
     expect(motion.sameWidth).toBe(true);
     expect(motion.overflow).toBe(false);
     await page.screenshot({ path: test.info().outputPath(`equalizer-${width}.png`), fullPage: true });
-    await page.locator("#pause").click();
+    const transport = page.locator(".transport button");
+    const buttonRects = (buttons) => buttons.map((button) => {
+      const { x, y, width, height } = button.getBoundingClientRect();
+      return { x, y, width, height };
+    });
+    const playingRects = await transport.evaluateAll(buttonRects);
+    const fall = await equalizer.evaluate(async (element) => {
+      const bars = [...element.querySelectorAll("span")];
+      // Freeze a known playback frame so the drop is deterministic.
+      for (const bar of bars) for (const animation of bar.getAnimations()) {
+        animation.pause();
+        animation.currentTime = 0;
+      }
+      const initial = bars.map((bar) => getComputedStyle(bar).clipPath);
+      document.querySelector("#pause").click();
+      while (!element.parentElement.classList.contains("is-paused")) {
+        await new Promise(requestAnimationFrame);
+      }
+      const animations = bars.map((bar) => bar.getAnimations()[0]);
+      const from = animations.map((animation) => animation.effect.getKeyframes()[0].clipPath);
+      const frames = [];
+      const started = performance.now();
+      while (performance.now() - started < 550) {
+        frames.push(bars.map((bar) => Number.parseFloat(getComputedStyle(bar).clipPath.slice(6))));
+        await new Promise(requestAnimationFrame);
+      }
+      return { initial, from, frames };
+    });
+    expect(fall.from).toEqual(fall.initial);
+    expect(fall.frames.some((frame) => frame.some((level) => level > 0 && level < 12 && ![4, 8].includes(level)))).toBe(true);
+    for (let i = 1; i < fall.frames.length; i++) {
+      for (let bar = 0; bar < 4; bar++) expect(fall.frames[i][bar]).toBeGreaterThanOrEqual(fall.frames[i - 1][bar]);
+    }
+    expect(fall.frames.at(-1)).toEqual([12, 12, 12, 12]);
     await expect(page.locator("#status")).toHaveText("Paused");
-    await expect(equalizer).toBeHidden();
+    await expect(equalizer).toBeVisible();
+    await expect(page.locator("#status")).toHaveClass("is-paused");
+    expect(await transport.evaluateAll(buttonRects)).toEqual(playingRects);
+    const paused = await equalizer.evaluate(async (element) => {
+      const bars = [...element.querySelectorAll("span")];
+      const snapshot = () => bars.map((bar) => ({
+        clip: getComputedStyle(bar).clipPath, animation: getComputedStyle(bar).animationName,
+      }));
+      const before = snapshot();
+      let mutations = 0;
+      const observer = new MutationObserver((records) => { mutations += records.length; });
+      observer.observe(element.parentElement, { subtree: true, childList: true, characterData: true, attributes: true });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      observer.disconnect();
+      return { before, after: snapshot(), mutations, width: element.getBoundingClientRect().width,
+        height: element.getBoundingClientRect().height };
+    });
+    expect(paused.before).toEqual(Array(4).fill({ clip: "inset(12px 0px 0px)", animation: "none" }));
+    expect(paused.after).toEqual(paused.before);
+    expect(paused.mutations).toBe(0);
+    expect(paused.width).toBe(15);
+    expect(paused.height).toBe(15);
+    await page.screenshot({ path: test.info().outputPath(`equalizer-paused-${width}.png`), fullPage: true });
+    const pausedElement = await equalizer.elementHandle();
     await page.locator("#pause").click();
     await expect(equalizer).toBeVisible();
+    await expect(page.locator("#status")).toHaveClass("is-playing");
+    expect(await transport.evaluateAll(buttonRects)).toEqual(playingRects);
+    expect(await equalizer.evaluate((element, previous) => element === previous, pausedElement)).toBe(true);
+    expect(await equalizer.locator("span").first().evaluate((bar) => getComputedStyle(bar).animationName)).toBe("status-levels-a");
     await page.emulateMedia({ reducedMotion: "reduce" });
     expect(await equalizer.locator("span").first().evaluate((bar) => getComputedStyle(bar).animationName)).toBe("none");
     const before = await equalizer.locator("span").first().evaluate((bar) => getComputedStyle(bar).clipPath);
     await page.waitForTimeout(250);
     expect(await equalizer.locator("span").first().evaluate((bar) => getComputedStyle(bar).clipPath)).toBe(before);
+    await page.locator("#pause").click();
+    await expect(page.locator("#status")).toHaveText("Paused");
+    expect(await equalizer.locator("span").evaluateAll((bars) => bars.map((bar) => ({
+      clip: getComputedStyle(bar).clipPath, animations: bar.getAnimations().length,
+    })))).toEqual(Array(4).fill({ clip: "inset(12px 0px 0px)", animations: 0 }));
     await page.locator("#stop").click();
     await expect(page.locator("#status")).toHaveText("Stopped");
     await expect(equalizer).toBeHidden();
@@ -124,7 +189,8 @@ test("equalizer hides during an underrun, returns with audio, and clears on erro
   release();
   await expect(page.locator("#first-audio")).not.toHaveText("—");
   await expect.poll(async () => Number.parseFloat(await page.locator("#buffer").textContent())).toBeGreaterThan(3);
-  await expect(page.locator(".status-equalizer")).toBeHidden();
+  await expect(page.locator(".status-equalizer")).toBeVisible();
+  await expect(page.locator("#status")).toHaveClass("is-paused");
   await page.locator("#pause").click();
   await expect(page.locator("#status")).toHaveText("Playing");
   await expect(page.locator(".status-equalizer")).toBeVisible();
