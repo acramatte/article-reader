@@ -35,8 +35,7 @@ test("URL auto-start, pause/resume, Stop → Read again generates the editor tex
   await page.keyboard.press("Enter");
   await expect(page.locator("#read-start")).toBeFocused();
   await expect(page.locator("#read-start")).toHaveText("Read again");
-  await expect(page.locator("#playback-hint")).toContainText("from the beginning");
-  await expect(page.locator("#playback-hint")).toContainText("generates new audio");
+  await expect(page.locator("#playback-hint")).toHaveCount(0);
   await expect(page.locator("#pause")).toBeDisabled();
   await page.screenshot({ path: test.info().outputPath("desktop-stopped.png"), fullPage: true });
   await page.keyboard.press("Enter");
@@ -81,6 +80,8 @@ test("URL-first landing, fallback and compact settings are keyboard reachable at
     await page.keyboard.press("Space");
     await expect(page.locator("#text")).toBeFocused();
     await expect(page.locator("#editor")).toHaveAttribute("open", "");
+    await expect(page.locator("#playback-hint")).toHaveCount(0);
+    await expect(page.locator('[aria-describedby~="playback-hint"]')).toHaveCount(0);
     await expect(page.locator("#article-panel")).toBeHidden();
     await page.locator("#read-start").focus();
     await page.keyboard.press("Enter");
@@ -99,6 +100,26 @@ test("URL-first landing, fallback and compact settings are keyboard reachable at
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expect(page.locator("#workspace")).toHaveCSS("opacity", "1");
     await page.screenshot({ path: test.info().outputPath(`fallback-${width}.png`), fullPage: true });
+  }
+});
+
+test("listening card keeps its responsive width when playback details are toggled", async ({ page }) => {
+  await page.route("**/api/article", (route) => route.abort());
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    await page.locator("#paste-fallback").click();
+    // Show the real diagnostics markup without requiring speech inference.
+    await page.locator("#diagnostics").evaluate((details) => { details.hidden = false; });
+    const card = page.locator("#listening-card");
+    const closedWidth = (await card.boundingBox()).width;
+    const readerWidth = (await page.locator("#reader").boundingBox()).width;
+    expect(closedWidth).toBeCloseTo(Math.min(700, readerWidth), 0);
+    await page.locator("#diagnostics summary").click();
+    expect((await card.boundingBox()).width).toBeCloseTo(closedWidth, 0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.locator("#diagnostics summary").click();
+    expect((await card.boundingBox()).width).toBeCloseTo(closedWidth, 0);
   }
 });
 

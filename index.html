@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Article Reader</title>
   <style>
-    :root { color-scheme: light; font: 16px system-ui, sans-serif; color: #172c31; background: #f3f6f5; }
+    :root { --content-width: 700px; --url-width: 800px; color-scheme: light; font: 16px system-ui, sans-serif; color: #172c31; background: #f3f6f5; }
     * { box-sizing: border-box; }
     body { display: flex; flex-direction: column; min-height: 100vh; max-width: 920px; margin: 0 auto; padding: 0 24px; overflow-anchor: none; }
     #reader { display: flex; flex: 1; flex-direction: column; }
@@ -54,7 +54,7 @@
     .hint { font-size: 0.85rem; color: #53676b; }
     .hero { padding: clamp(64px, 16vh, 160px) 0 28px; text-align: center; transition: padding 650ms cubic-bezier(.22, 1, .36, 1); }
     .intro { font-size: 1.1rem; margin: 16px auto 32px; max-width: 560px; max-height: 100px; overflow: hidden; opacity: 1; line-height: 1.6; transition: margin 650ms ease, max-height 650ms ease, opacity 650ms ease; }
-    #url-form { max-width: 800px; margin: 0 auto; }
+    #url-form { width: 100%; max-width: var(--url-width); margin: 0 auto; }
     #url-form label { text-align: left; color: #53676b; font-size: 0.9rem; margin-bottom: 8px; }
     .url-action { display: flex; gap: 8px; padding: 8px; border: 1px solid #93a7a1; border-radius: 16px; background: white; box-shadow: 0 8px 28px #172c3108; }
     #url { flex: 1; min-width: 0; border: 0; font-size: 1.1rem; padding: 14px; min-height: 54px; background: white; }
@@ -62,11 +62,13 @@
     .fallback-link { background: transparent; border: 0; color: #53676b; text-decoration: underline; text-underline-offset: 3px; margin-top: 8px; }
     .fallback-link.recommended { color: #126b59; font-weight: 650; }
     .is-revealed .hero { padding-top: 24px; padding-bottom: 8px; }
-    .is-revealed h1 { font-size: 1.8rem; margin: 12px 0; }
-    .is-revealed .intro { max-height: 0; opacity: 0; margin: 12px auto; }
+    .hero-copy { display: grid; grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows 650ms ease, opacity 650ms ease, visibility 650ms; }
+    .hero-copy-inner { min-height: 0; overflow: hidden; }
+    .is-revealed .hero-copy { grid-template-rows: 0fr; opacity: 0; visibility: hidden; }
     #workspace { animation: article-arrival 650ms ease both; }
     @keyframes article-arrival { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
-    .console { max-width: 700px; margin: 0 auto 24px; box-shadow: 0 8px 30px #172c3108; }
+    .console, #workspace { width: 100%; max-width: var(--content-width); margin-inline: auto; }
+    .console { margin: 0 auto 24px; box-shadow: 0 8px 30px #172c3108; }
     .console h2 { margin: 0; font-size: 1.1rem; }
     .console-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
     .console-heading #status { margin: 0; font-size: 0.9rem; }
@@ -78,7 +80,6 @@
     #editor label { margin-top: 16px; }
     .transport { display: flex; gap: 8px; margin-top: 12px; }
     #read-start { flex: 1; font-weight: 650; }
-    #playback-hint { margin: 10px 0 18px; }
     #status { margin: 0 0 16px; }
     details { border-top: 1px solid #e3ebe7; padding: 12px 0; }
     summary { cursor: pointer; font-size: 0.9rem; color: #53676b; min-height: 28px; }
@@ -102,15 +103,19 @@
       .transport .secondary { flex: 1; }
     }
     @media (max-width: 360px) { h1 { font-size: 1.85rem; } }
-    @media (prefers-reduced-motion: reduce) { .hero, h1, .intro { transition: none; } #workspace { animation: none; } }
+    @media (prefers-reduced-motion: reduce) { .hero, h1, .intro, .hero-copy { transition: none; } #workspace { animation: none; } }
   </style>
 </head>
 <body>
   <main id="reader">
-    <header class="hero" aria-labelledby="page-title">
-      <p class="eyebrow">Article Reader · Your listening desk</p>
-      <h1 id="page-title">Give a good article<br /> your full attention.</h1>
-      <p class="intro">Paste a link. Find the article behind the page.<br />Then settle in and listen.</p>
+    <header class="hero" aria-label="Article reader">
+      <div class="hero-copy">
+        <div class="hero-copy-inner">
+          <p class="eyebrow">Article Reader · Your listening desk</p>
+          <h1 id="page-title">Give a good article<br /> your full attention.</h1>
+          <p class="intro">Paste a link. Find the article behind the page.<br />Then settle in and listen.</p>
+        </div>
+      </div>
       <form id="url-form">
         <label for="url">Webpage URL</label>
         <div class="url-action">
@@ -137,11 +142,10 @@
     </div>
     <div id="playback" hidden>
       <div class="transport" role="group" aria-label="Playback controls">
-        <button id="read-start" type="button" aria-describedby="playback-hint">Read again</button>
-        <button id="pause" type="button" class="secondary" disabled aria-describedby="playback-hint">Pause</button>
-        <button id="stop" type="button" class="secondary" disabled aria-describedby="playback-hint">Stop</button>
+        <button id="read-start" type="button">Read again</button>
+        <button id="pause" type="button" class="secondary" disabled>Pause</button>
+        <button id="stop" type="button" class="secondary" disabled>Stop</button>
       </div>
-      <p id="playback-hint" class="hint">Read again starts from the beginning and generates new audio, not saved audio.</p>
     </div>
 
     <details id="diagnostics" hidden>

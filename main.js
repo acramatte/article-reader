@@ -18,9 +18,6 @@ function renderSource() {
   setDisabled($("#read-url"), active);
   setDisabled($("#paste-fallback"), active);
   setText($("#read-start"), hasReadText || source === "url" ? "Read again" : "Read text");
-  setText($("#playback-hint"), active
-    ? "Pause holds your place. Resume continues there; Stop discards the audio."
-    : "Starts from the beginning and generates new audio each time. It does not replay saved audio.");
 }
 
 function revealWorkspace() {

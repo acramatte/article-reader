@@ -47,6 +47,8 @@ for (const [width, reducedMotion] of [[1280, "no-preference"], [390, "no-prefere
     await expect(page.locator("#workspace")).toBeHidden();
     await expect(page.locator("#article-title")).toHaveText("");
     await expect(page.locator("#url")).toBeFocused();
+    await expect(page.locator(".eyebrow")).toBeVisible();
+    await expect(page.locator("#page-title")).toBeVisible();
     release();
     await expect(page.locator("#article-panel")).toBeVisible();
     await expect(page.locator("#article-title")).toHaveText(article.title);
@@ -54,13 +56,24 @@ for (const [width, reducedMotion] of [[1280, "no-preference"], [390, "no-prefere
     await expect(page.locator("#text")).toBeHidden();
     const motion = await page.evaluate(() => window.__motion);
     const finalTop = motion.tops.at(-1);
-    await expect(page.locator(".eyebrow")).toHaveText("Article Reader · Your listening desk");
-    await expect(page.locator("#page-title")).toHaveText("Give a good article your full attention.");
-    expect((await page.locator("#page-title").innerText()).split("\n").map((line) => line.trim())).toEqual(["Give a good article", "your full attention."]);
-    const headlineLines = await page.locator("#page-title").evaluate((heading) => [...heading.childNodes]
-      .filter((node) => node.nodeType === Node.TEXT_NODE)
-      .flatMap((node) => { const range = document.createRange(); range.selectNodeContents(node); return [...range.getClientRects()].filter((rect) => rect.width > 1); }).length);
-    expect(headlineLines).toBe(2);
+    await expect(page.locator(".eyebrow")).toBeHidden();
+    await expect(page.locator("#page-title")).toBeHidden();
+    await expect(page.locator(".intro")).toBeHidden();
+    expect((await page.locator(".hero-copy").boundingBox()).height).toBeLessThan(1);
+    const readerBox = await page.locator("#reader").boundingBox();
+    const urlBox = await page.locator("#url-form").boundingBox();
+    const cardBox = await page.locator("#listening-card").boundingBox();
+    const articleBox = await page.locator("#article-panel").boundingBox();
+    const editorBox = await page.locator("#editor").boundingBox();
+    expect(urlBox.width).toBeCloseTo(Math.min(800, readerBox.width), 0);
+    expect(cardBox.width).toBeCloseTo(Math.min(700, readerBox.width), 0);
+    for (const box of [articleBox, editorBox]) {
+      expect(box.width).toBeCloseTo(cardBox.width, 0);
+      expect(box.x).toBeCloseTo(cardBox.x, 0);
+    }
+    expect(urlBox.x + urlBox.width / 2).toBeCloseTo(cardBox.x + cardBox.width / 2, 0);
+    const bodyBox = await page.locator("#article-body").boundingBox();
+    expect(bodyBox.y).toBeLessThan(page.viewportSize().height - 50);
     expect(finalTop).toBeLessThan(motion.before - 30);
     expect(motion.focused).toBe(true);
     expect(motion.sameInput).toBe(true);
