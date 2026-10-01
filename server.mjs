@@ -30,8 +30,8 @@ export function createApp({
     const controller = new AbortController();
     request.on("aborted", () => controller.abort());
     response.on("close", () => { if (!response.writableEnded) controller.abort(); });
-    const json = (status, body) => {
-      response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    const json = (status, body, headers = {}) => {
+      response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers });
       response.end(JSON.stringify(body));
     };
     try {
@@ -63,6 +63,11 @@ export function createApp({
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]),
           redirect: "error",
         });
+        if (upstream.status === 503) {
+          await upstream.body?.cancel();
+          return json(503, { code: "INFERENCE_UNAVAILABLE", error: "Speech engine is temporarily unavailable or starting up." },
+            { "Retry-After": upstream.headers.get("Retry-After") || "2" });
+        }
         if (!upstream.ok) { await upstream.body?.cancel(); return json(502, { error: `Kokoro returned HTTP ${upstream.status}.` }); }
         if (!/^audio\/wav(?:;|$)/i.test(upstream.headers.get("content-type") || "")) {
           await upstream.body?.cancel();

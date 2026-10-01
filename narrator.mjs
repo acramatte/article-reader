@@ -14,6 +14,7 @@ export class Narrator {
     this.total = 0;
     this.underruns = 0;
     this.paused = false;
+    this.warming = false;
     this.state = "loading";
     this.firstAudioSeconds = null;
     this.timer = null;
@@ -22,9 +23,15 @@ export class Narrator {
   get bufferedSeconds() { return Math.max(0, this.nextTime - this.context.currentTime); }
 
   update() {
-    this.onUpdate({ state: this.state, paused: this.paused, bufferedSeconds: this.bufferedSeconds,
+    this.onUpdate({ state: this.state, paused: this.paused, warming: this.warming, bufferedSeconds: this.bufferedSeconds,
       generated: this.generated, completed: this.completed, total: this.total,
       firstAudioSeconds: this.firstAudioSeconds, underruns: this.underruns, error: this.error });
+  }
+
+  setWarming(warming) {
+    if (this.controller.signal.aborted) return;
+    this.warming = warming;
+    this.update();
   }
 
   async start(loadChunks) {
@@ -46,7 +53,7 @@ export class Narrator {
           await this.wait(100);
         }
         this.controller.signal.throwIfAborted();
-        const wav = await this.synthesize(text, this.controller.signal);
+        const wav = await this.synthesize(text, this.controller.signal, this.setWarming.bind(this));
         this.controller.signal.throwIfAborted();
         const buffer = await this.context.decodeAudioData(wav);
         this.controller.signal.throwIfAborted();
@@ -114,6 +121,7 @@ export class Narrator {
     this.sources.clear();
     this.state = state;
     this.paused = false;
+    this.warming = false;
     this.nextTime = this.context.currentTime;
     this.update();
     if (this.context.state !== "closed") await this.context.close();

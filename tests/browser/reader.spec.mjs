@@ -124,6 +124,113 @@ test("playback ticks preserve unchanged text nodes and disabled attributes", asy
   await expect(page.locator("#status")).toHaveText("Stopped");
 });
 
+test("simulated startup 503s show waking status and recover into real audio", async ({ page }) => {
+  await probe(page);
+  let calls = 0;
+  await page.route("**/api/tts", async (route) => {
+    calls++;
+    if (calls <= 2) await route.fulfill({ status: 503, contentType: "application/json", headers: { "Retry-After": "1" },
+      body: JSON.stringify({ code: "INFERENCE_UNAVAILABLE", error: "Simulated startup" }) });
+    else await route.continue(); // Actual backend/Kokoro WAV, not synthetic audio.
+  });
+  await page.goto("/");
+  await page.getByLabel("Extracted or pasted text").fill("The speech engine can wake up and read this sentence.");
+  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Speech engine is waking up…");
+  await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeEnabled();
+  await page.screenshot({ path: test.info().outputPath("waking-up.png"), fullPage: true });
+  await expect(page.locator("#first-audio")).not.toHaveText("—", { timeout: 30_000 });
+  expect(calls).toBe(3);
+  expect(await page.evaluate(() => window.__audio.decoded[0].rms)).toBeGreaterThan(0.005);
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
+});
+
+test("first-audio generation shares the spinner and clears it for playback", async ({ page }) => {
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  await page.route("**/api/tts", async (route) => { await pending; await route.continue(); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByLabel("Extracted or pasted text").fill("The reader shows a spinner while generating this first sentence.");
+  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Generating first audio…");
+  await expect(page.locator("#status")).toHaveClass("is-busy");
+  expect(await page.locator("#status").evaluate((element) => getComputedStyle(element.querySelector(".status-spinner"), "::before").animationName)).toBe("status-dots");
+  await page.screenshot({ path: test.info().outputPath("mobile-generating-spinner.png"), fullPage: true });
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Paused");
+  await expect(page.locator("#status")).not.toHaveClass("is-busy");
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect(page.locator("#status")).toHaveClass("is-busy");
+  release(); // Release the test-only delay; synthesis and audio are real.
+  await expect(page.locator("#status")).toHaveText("Playing", { timeout: 30_000 });
+  await expect(page.locator("#status")).not.toHaveClass("is-busy");
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+});
+
+test("waking spinner animates without live-region mutations and respects reduced motion", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/tts", (route) => route.fulfill({ status: 503, contentType: "application/json", headers: { "Retry-After": "5" },
+    body: JSON.stringify({ code: "INFERENCE_UNAVAILABLE" }) }));
+  await page.goto("/");
+  await page.getByLabel("Extracted or pasted text").fill("This request deliberately simulates a sleeping endpoint.");
+  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Speech engine is waking up…");
+  await expect(page.locator("#status")).toHaveClass("is-busy");
+  await expect(page.locator(".status-spinner")).toHaveAttribute("aria-hidden", "true");
+  const animation = await page.locator("#status").evaluate(async (element) => {
+    const before = getComputedStyle(element.querySelector(".status-spinner"), "::before").content;
+    const textNode = element.firstChild;
+    let mutations = 0;
+    const observer = new MutationObserver((records) => { mutations += records.length; });
+    observer.observe(element, { childList: true, subtree: true, characterData: true, attributes: true });
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    observer.disconnect();
+    return { name: getComputedStyle(element.querySelector(".status-spinner"), "::before").animationName, before,
+      after: getComputedStyle(element.querySelector(".status-spinner"), "::before").content, mutations, sameTextNode: textNode === element.firstChild };
+  });
+  expect(animation.name).toBe("status-dots");
+  expect(animation.after).not.toBe(animation.before);
+  expect(animation.mutations).toBe(0);
+  expect(animation.sameTextNode).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("mobile-status-spinner.png"), fullPage: true });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await page.locator("#status").evaluate((element) => getComputedStyle(element.querySelector(".status-spinner"), "::before").animationName)).toBe("none");
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Paused");
+  await expect(page.locator("#status")).not.toHaveClass("is-busy");
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect(page.locator("#status")).toHaveClass("is-busy");
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
+  await expect(page.locator("#status")).not.toHaveClass("is-busy");
+});
+
+test("Stop during simulated startup cancels retry wait and permits a fresh session", async ({ page }) => {
+  let calls = 0;
+  let starting = true;
+  await page.route("**/api/tts", async (route) => {
+    calls++;
+    if (starting) await route.fulfill({ status: 503, contentType: "application/json", headers: { "Retry-After": "2" },
+      body: JSON.stringify({ code: "INFERENCE_UNAVAILABLE" }) });
+    else await route.continue();
+  });
+  await page.goto("/");
+  await page.getByLabel("Extracted or pasted text").fill("Stop cancels waiting for the speech engine.");
+  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Speech engine is waking up…");
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
+  const stoppedCalls = calls;
+  await page.waitForTimeout(2300);
+  expect(calls).toBe(stoppedCalls);
+  starting = false;
+  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Finished", { timeout: 30_000 });
+});
+
 test("private URL is blocked and extraction failure can recover with pasted text", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Webpage URL").fill("http://127.0.0.1/secret");

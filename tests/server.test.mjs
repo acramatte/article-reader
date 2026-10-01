@@ -38,8 +38,31 @@ test("API rejects invalid requests and cross-origin browser calls", async (t) =>
   assert.equal((await post("/api/article", {}, { Origin: "https://evil.example" })).status, 403);
 });
 
+test("upstream 503 exposes only a retryable code and Retry-After, not provider details", async (t) => {
+  for (const retryAfter of ["7", "Wed, 21 Oct 2030 07:28:00 GMT", null]) {
+    const post = await app(t, { synthesize: async () => new Response("provider-internal-details", {
+      status: 503, headers: retryAfter ? { "Retry-After": retryAfter } : {},
+    }) });
+    const response = await post("/api/tts", { text: "Hello", voice: "af_heart", speed: 1 });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Retry-After"), retryAfter || "2");
+    const problem = await response.json();
+    assert.equal(problem.code, "INFERENCE_UNAVAILABLE");
+    assert.doesNotMatch(problem.error, /provider-internal-details/);
+  }
+});
+
+test("authentication and busy errors are not classified as startup", async (t) => {
+  for (const status of [401, 403, 429]) {
+    const post = await app(t, { synthesize: async () => new Response("failed", { status }) });
+    const response = await post("/api/tts", { text: "Hello", voice: "af_heart", speed: 1 });
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).code, undefined);
+  }
+});
+
 test("upstream errors and non-WAV responses become actionable API errors", async (t) => {
-  for (const response of [new Response("failed", { status: 503 }), new Response("not audio")]) {
+  for (const response of [new Response("failed", { status: 500 }), new Response("not audio")]) {
     const post = await app(t, { synthesize: async () => response });
     const result = await post("/api/tts", { text: "Hello", voice: "af_heart", speed: 1 });
     assert.equal(result.status, 502);

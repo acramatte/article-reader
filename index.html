@@ -24,6 +24,25 @@
     .row > div { flex: 1 1 140px; }
     select { width: 100%; background: white; }
     #status { font-weight: 600; overflow-wrap: anywhere; }
+    .status-spinner { display: none; }
+    #status.is-busy .status-spinner {
+      display: inline-block; width: 1em; margin-inline-start: 0.35em;
+      font-family: monospace; color: #126b59; text-align: center;
+    }
+    #status.is-busy .status-spinner::before { content: "⠋"; animation: status-dots 1s step-end infinite; }
+    @keyframes status-dots {
+      0%, 100% { content: "⠋"; }
+      10% { content: "⠙"; }
+      20% { content: "⠹"; }
+      30% { content: "⠸"; }
+      40% { content: "⠼"; }
+      50% { content: "⠴"; }
+      60% { content: "⠦"; }
+      70% { content: "⠧"; }
+      80% { content: "⠇"; }
+      90% { content: "⠏"; }
+    }
+    @media (prefers-reduced-motion: reduce) { #status.is-busy .status-spinner::before { animation: none; } }
     dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 0; }
     dt { font-size: 0.8rem; color: #53676b; }
     dd { margin: 6px 0 0; font-variant-numeric: tabular-nums; }
@@ -48,7 +67,7 @@
       <div><label for="speed">Narration speed</label><select id="speed"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.2">1.2×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></div>
     </div>
     <div class="row"><button id="pause" class="secondary" disabled>Pause</button><button id="stop" class="secondary" disabled>Stop</button></div>
-    <p id="status" role="status" aria-live="polite">Ready. Enter a URL or paste text below.</p>
+    <p id="status" role="status" aria-live="polite"><span id="status-text">Ready. Enter a URL or paste text below.</span><span class="status-spinner" aria-hidden="true"></span></p>
     <dl>
       <div><dt>Audio buffered</dt><dd id="buffer">0.0 s</dd></div>
       <div><dt>Chunks played</dt><dd id="progress">0 / 0</dd></div>

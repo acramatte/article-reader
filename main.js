@@ -1,9 +1,11 @@
 import { chunkText } from "./chunks.mjs";
 import { Narrator } from "./narrator.mjs";
+import { synthesizeSpeech } from "./tts-client.mjs";
 
 const $ = (selector) => document.querySelector(selector);
 const textArea = $("#text");
 const status = $("#status");
+const statusText = $("#status-text");
 let narrator = null;
 
 async function post(path, body, signal) {
@@ -32,8 +34,10 @@ function render(update) {
   setDisabled($("#pause"), !active || update.state === "loading");
   setText($("#pause"), update.paused ? "Resume" : "Pause");
   const labels = { loading: "Fetching and extracting article…", generating: "Generating first audio…", playing: "Playing", stopped: "Stopped", finished: "Finished", error: "Could not read article" };
-  const state = update.paused ? "Paused" : update.state === "playing" && update.bufferedSeconds < 0.05 ? "Buffering…" : labels[update.state];
-  setText(status, update.error ? `${state}: ${update.error}` : state);
+  const state = update.paused ? "Paused" : update.warming ? "Speech engine is waking up…" : update.state === "playing" && update.bufferedSeconds < 0.05 ? "Buffering…" : labels[update.state];
+  setText(statusText, update.error ? `${state}: ${update.error}` : state);
+  const busy = Boolean(active && (update.warming || update.state === "generating") && !update.paused && !update.error);
+  if (status.classList.contains("is-busy") !== busy) status.classList.toggle("is-busy", busy);
   setText($("#buffer"), `${update.bufferedSeconds.toFixed(1)} s`);
   setText($("#progress"), `${update.completed} / ${update.total}`);
   setText($("#first-audio"), update.firstAudioSeconds === null ? "—" : `${update.firstAudioSeconds.toFixed(2)} s`);
@@ -42,16 +46,16 @@ function render(update) {
 
 function read(fromUrl) {
   const input = fromUrl ? $("#url").value.trim() : textArea.value.trim();
-  if (!input) { status.textContent = fromUrl ? "Enter a webpage URL first." : "Enter some text first."; return; }
-  if (!fromUrl && input.length > 100_000) { status.textContent = "Text exceeds the 100,000 character limit."; return; }
+  if (!input) { statusText.textContent = fromUrl ? "Enter a webpage URL first." : "Enter some text first."; return; }
+  if (!fromUrl && input.length > 100_000) { statusText.textContent = "Text exceeds the 100,000 character limit."; return; }
   const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) { status.textContent = "This browser does not support Web Audio."; return; }
+  if (!AudioContext) { statusText.textContent = "This browser does not support Web Audio."; return; }
   const voice = $("#voice").value;
   const speed = Number($("#speed").value);
   try {
     const session = new Narrator({
       audioContext: new AudioContext(),
-      synthesize: async (text, signal) => (await post("/api/tts", { text, voice, speed }, signal)).arrayBuffer(),
+      synthesize: (text, signal, onWaiting) => synthesizeSpeech({ text, voice, speed }, signal, onWaiting),
       onUpdate: (update) => { if (narrator === session) render(update); },
     });
     narrator = session;
@@ -69,7 +73,7 @@ function read(fromUrl) {
       }
       return chunkText(text);
     });
-  } catch (error) { status.textContent = error.message; }
+  } catch (error) { statusText.textContent = error.message; }
 }
 
 $("#url-form").addEventListener("submit", (event) => { event.preventDefault(); read(true); });
