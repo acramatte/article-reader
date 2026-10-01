@@ -7,10 +7,11 @@
   <style>
     :root { color-scheme: light; font: 16px system-ui, sans-serif; color: #172c31; background: #f3f6f5; }
     * { box-sizing: border-box; }
-    body { max-width: 860px; margin: 32px auto; padding: 0 20px; }
-    h1 { margin-bottom: 8px; }
+    body { max-width: 920px; margin: 0 auto; padding: 0 24px 40px; overflow-anchor: none; }
+    .eyebrow { margin: 0; color: #126b59; text-transform: uppercase; letter-spacing: .12em; font-size: .75rem; font-weight: 700; line-height: 1.6; }
+    h1 { margin: 22px 0 18px; font-size: clamp(2.1rem, 5vw, 3.6rem); line-height: 1.12; letter-spacing: -.045em; transition: font-size 650ms ease, margin 650ms ease; }
     .intro, #byline { color: #53676b; }
-    section, form { padding: 20px; margin: 20px 0; border: 1px solid #d2dfdb; border-radius: 12px; background: white; }
+    section { padding: 20px; margin: 20px 0; border: 1px solid #d2dfdb; border-radius: 12px; background: white; }
     label { display: block; font-weight: 600; margin-bottom: 6px; }
     input, textarea, select, button { font: inherit; }
     input, textarea { width: 100%; padding: 10px; border: 1px solid #93a7a1; border-radius: 6px; }
@@ -49,42 +50,124 @@
     #source { overflow-wrap: anywhere; color: #126b59; }
     #article-title { margin-top: 0; }
     .hint { font-size: 0.85rem; color: #53676b; }
-    @media (max-width: 520px) { body { margin: 20px auto; padding: 0 12px; } section, form { padding: 16px; } dl { grid-template-columns: repeat(2, 1fr); } }
+    .hero { padding: clamp(64px, 16vh, 160px) 0 28px; text-align: center; transition: padding 650ms cubic-bezier(.22, 1, .36, 1); }
+    .intro { font-size: 1.1rem; margin: 16px auto 32px; max-width: 560px; max-height: 100px; overflow: hidden; opacity: 1; line-height: 1.6; transition: margin 650ms ease, max-height 650ms ease, opacity 650ms ease; }
+    #url-form { max-width: 800px; margin: 0 auto; }
+    #url-form label { text-align: left; color: #53676b; font-size: 0.9rem; margin-bottom: 8px; }
+    .url-action { display: flex; gap: 8px; padding: 8px; border: 1px solid #93a7a1; border-radius: 16px; background: white; box-shadow: 0 8px 28px #172c3108; }
+    #url { flex: 1; min-width: 0; border: 0; font-size: 1.1rem; padding: 14px; min-height: 54px; background: white; }
+    #read-url { padding: 12px 22px; font-weight: 650; border-radius: 10px; }
+    .fallback-link { background: transparent; border: 0; color: #53676b; text-decoration: underline; text-underline-offset: 3px; margin-top: 8px; }
+    .fallback-link.recommended { color: #126b59; font-weight: 650; }
+    .is-revealed .hero { padding-top: 24px; padding-bottom: 8px; }
+    .is-revealed h1 { font-size: 1.8rem; margin: 12px 0; }
+    .is-revealed .intro { max-height: 0; opacity: 0; margin: 12px auto; }
+    #workspace { animation: article-arrival 650ms ease both; }
+    @keyframes article-arrival { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+    .console { max-width: 700px; margin: 0 auto 24px; box-shadow: 0 8px 30px #172c3108; }
+    .console h2 { margin: 0; font-size: 1.1rem; }
+    .console-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .console-heading #status { margin: 0; font-size: 0.9rem; }
+    #fallback-advice { margin-top: 0; color: #8c4226; line-height: 1.5; }
+    #article-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; max-height: 480px; overflow: auto; padding: 4px 12px 12px 0; }
+    #article-panel { margin-top: 0; }
+    #editor { padding: 18px; background: white; border: 1px solid #d2dfdb; border-radius: 12px; }
+    #editor summary { color: #172c31; font-weight: 600; }
+    #editor label { margin-top: 16px; }
+    .transport { display: flex; gap: 8px; margin-top: 12px; }
+    #read-start { flex: 1; font-weight: 650; }
+    #playback-hint { margin: 10px 0 18px; }
+    #status { margin: 0 0 16px; }
+    details { border-top: 1px solid #e3ebe7; padding: 12px 0; }
+    summary { cursor: pointer; font-size: 0.9rem; color: #53676b; min-height: 28px; }
+    details:last-child { padding-bottom: 0; }
+    .hero .settings { max-width: 400px; margin: 12px auto 0; border: 0; padding-top: 0; text-align: left; }
+    .hero .settings summary { text-align: center; font-size: .85rem; min-height: 44px; padding: 10px 0; }
+    .settings label { font-size: 0.85rem; }
+    .settings select { min-height: 40px; padding: 6px 10px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 520px) {
+      body { padding: 0 16px 24px; }
+      section { padding: 16px; }
+      .hero { padding-top: clamp(56px, 12vh, 110px); }
+      .url-action { flex-wrap: wrap; }
+      #url { flex-basis: 100%; width: 100%; padding: 12px 8px; }
+      #read-url { width: 100%; }
+      .intro { font-size: 1rem; margin-bottom: 24px; }
+      dl { grid-template-columns: repeat(2, 1fr); }
+      .transport { flex-wrap: wrap; }
+      #read-start { flex-basis: 100%; }
+      .transport .secondary { flex: 1; }
+    }
+    @media (max-width: 360px) { h1 { font-size: 1.85rem; } }
+    @media (prefers-reduced-motion: reduce) { .hero, h1, .intro { transition: none; } #workspace { animation: none; } }
   </style>
 </head>
 <body>
-  <h1>Article Reader</h1>
-  <p class="intro">A webpage, a clean article, a voice. Narrated by Kokoro on the backend.</p>
-  <form id="url-form">
-    <label for="url">Webpage URL</label>
-    <input id="url" type="url" placeholder="https://example.com/article" required />
-    <div class="row"><button id="read-url" type="submit">Read article</button></div>
-    <p class="hint">Fetches and extracts the article, then starts narration. Some JavaScript-heavy or paywalled pages need pasted text instead.</p>
-  </form>
-  <section aria-label="Narration">
-    <div class="row">
-      <div><label for="voice">Voice</label><select id="voice"><option value="af_heart">Heart</option><option value="af_bella">Bella</option><option value="af_nicole">Nicole</option></select></div>
-      <div><label for="speed">Narration speed</label><select id="speed"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.2">1.2×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></div>
+  <main id="reader">
+    <header class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">Article Reader · Your listening desk</p>
+      <h1 id="page-title">Give a good article<br /> your full attention.</h1>
+      <p class="intro">Paste a link. Find the article behind the page.<br />Then settle in and listen.</p>
+      <form id="url-form">
+        <label for="url">Webpage URL</label>
+        <div class="url-action">
+          <input id="url" type="url" placeholder="Paste an article link here…" required aria-describedby="url-hint" />
+          <button id="read-url" type="submit">Read article</button>
+        </div>
+        <p id="url-hint" class="hint">Extracts the article and starts narration automatically.</p>
+      </form>
+      <button id="paste-fallback" type="button" class="fallback-link" aria-controls="workspace" aria-expanded="false">Can't extract a page? Paste text instead</button>
+    <details id="voice-settings" class="settings">
+      <summary>Voice &amp; speed <span id="settings-summary">· Heart · 1×</span></summary>
+      <div class="row">
+        <div><label for="voice">Voice</label><select id="voice"><option value="af_heart">Heart</option><option value="af_bella">Bella</option><option value="af_nicole">Nicole</option></select></div>
+        <div><label for="speed">Narration speed</label><select id="speed"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.2">1.2×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></div>
+      </div>
+      <p class="hint">Stop to change these settings. English voices; fixed for each narration.</p>
+    </details>
+    </header>
+  <section id="listening-card" class="console" aria-label="Listening controls" hidden>
+    <p id="fallback-advice" class="hint" hidden>This page could not be extracted. Try another URL, or use “Paste text instead” above.</p>
+    <div class="console-heading">
+      <h2 id="listen-title" hidden>Listen</h2>
+      <p id="status" role="status" aria-live="polite"><span id="status-text"></span><span class="status-spinner" aria-hidden="true"></span></p>
     </div>
-    <div class="row"><button id="pause" class="secondary" disabled>Pause</button><button id="stop" class="secondary" disabled>Stop</button></div>
-    <p id="status" role="status" aria-live="polite"><span id="status-text">Ready. Enter a URL or paste text below.</span><span class="status-spinner" aria-hidden="true"></span></p>
-    <dl>
-      <div><dt>Audio buffered</dt><dd id="buffer">0.0 s</dd></div>
-      <div><dt>Chunks played</dt><dd id="progress">0 / 0</dd></div>
-      <div><dt>First audio scheduled</dt><dd id="first-audio">—</dd></div>
-      <div><dt>Buffer underruns</dt><dd id="underruns">0</dd></div>
-    </dl>
-    <p class="hint">Starts with a small chunk, then buffers about 45 seconds ahead. Keep this tab open while listening.</p>
+    <div id="playback" hidden>
+      <div class="transport" role="group" aria-label="Playback controls">
+        <button id="read-start" type="button" aria-describedby="playback-hint">Read again</button>
+        <button id="pause" type="button" class="secondary" disabled aria-describedby="playback-hint">Pause</button>
+        <button id="stop" type="button" class="secondary" disabled aria-describedby="playback-hint">Stop</button>
+      </div>
+      <p id="playback-hint" class="hint">Read again starts from the beginning and generates new audio, not saved audio.</p>
+    </div>
+
+    <details id="diagnostics" hidden>
+      <summary>Buffer &amp; playback details</summary>
+      <dl>
+        <div><dt>Audio buffered</dt><dd id="buffer">0.0 s</dd></div>
+        <div><dt>Chunks played</dt><dd id="progress">0 / 0</dd></div>
+        <div><dt>First audio scheduled</dt><dd id="first-audio">—</dd></div>
+        <div><dt>Buffer underruns</dt><dd id="underruns">0</dd></div>
+      </dl>
+      <p class="hint">Buffers about 45 seconds ahead. Keep this tab open while listening.</p>
+    </details>
   </section>
-  <section aria-label="Article text">
-    <h2 id="article-title">Article text</h2>
-    <p id="byline"></p>
-    <p><a id="source" target="_blank" rel="noopener noreferrer"></a></p>
-    <label for="text">Extracted or pasted text</label>
-    <textarea id="text" placeholder="Paste an article here, or enter a URL above."></textarea>
-    <div class="row"><button id="read-text" type="button">Read text</button></div>
-    <p class="hint">Stop playback to edit the text, change voice, or read another article. Voices are English in this first version.</p>
-  </section>
+  <div id="workspace" hidden>
+    <section id="article-panel" aria-labelledby="article-title" hidden>
+      <h2 id="article-title"></h2>
+      <p id="byline"></p>
+      <p><a id="source" target="_blank" rel="noopener noreferrer"></a></p>
+      <div id="article-body" tabindex="0" role="region" aria-label="Retrieved article content"></div>
+    </section>
+    <details id="editor">
+      <summary id="editor-summary">Edit article text</summary>
+      <label for="text">Extracted or pasted text</label>
+      <textarea id="text" placeholder="Copy the article text from the webpage and paste it here."></textarea>
+      <p class="hint">Stop to edit. Then use Read again in the listening card to generate narration from the beginning.</p>
+    </details>
+  </div>
+  </main>
   <script type="module" src="/main.js"></script>
 </body>
 </html>

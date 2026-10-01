@@ -10,7 +10,9 @@ Node 24 and the existing Python 3.12 Kokoro environment are used here.
 2. Start the existing service from `kokoro-service`: `.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000`.
 3. In the project root, `npm run backend` (127.0.0.1:3001).
 4. In another terminal, `npm run dev`.
-5. Open http://localhost:5173. Click **Read article**, or paste text and click **Read text**.
+5. Open http://localhost:5173. Paste a webpage URL into the large landing field and choose **Read article**. Extraction starts narration automatically, smoothly brings the URL area toward the top, and reveals the retrieved article. Reduced-motion users get the same layout immediately. **Paste text instead** is a secondary fallback, highlighted after extraction errors; the editor is not shown initially. Retrieved content can be edited through **Edit article text** after stopping.
+
+The compact Listen card groups **Read again**, **Pause/Resume** and **Stop**. After Stop or completion, **Read again** starts the current editor text from the beginning with newly generated audio, without fetching the URL again. **Read article** by the URL field explicitly fetches a page. Voice/speed and buffer diagnostics are collapsible.
 
 Both browser API requests are same-origin. Vite proxies `/api` to the app backend. The browser never calls the Python service directly and never receives a model-provider token. Pause freezes the audio clock and stops new synthesis requests; one in-flight request may complete. Stop aborts fetches, drops pending audio and closes the audio context. Cancelling an HTTP request cannot interrupt Python inference that has already started.
 
@@ -41,6 +43,33 @@ English voices: Heart, Bella, Nicole. Voice and synthesis speed are fixed for ea
 
 - `npm test`: extraction, SSRF/redirect validation, socket limits, chunking, API behavior, scheduling, backpressure, pause, cancellation and cleanup.
 - `npm run build`: production bundle.
-- `npx playwright install chromium` then `npm run test:browser`: real public article + **real local Kokoro** + Web Audio playback, buffer continuity, pause/resume/stop, 390px mobile layout and natural completion. Requires the Python service and external access to `https://www.paulgraham.com/greatwork.html`; the test runner starts the app backend and Vite when necessary. The error-path test intentionally simulates a TTS failure, not a successful audio response. Traces/screenshots are stored under `$TMPDIR/tts-playwright` (or `./tts-playwright`). Headless browser playback verifies non-silent samples and scheduling, not human-perceived narration quality.
+- `npx playwright install chromium` then `npm run test:browser`: real public article + **real local Kokoro** + Web Audio playback, buffer continuity, pause/resume/stop, 390px mobile layout and natural completion. Requires the Python service and external access to `https://www.paulgraham.com/greatwork.html`; the test runner starts the app backend and Vite when necessary. The error-path test intentionally simulates a TTS failure, not a successful audio response. Traces/screenshots are stored under `.ui-review/playwright/` in this worktree. Headless browser playback verifies non-silent samples and scheduling, not human-perceived narration quality.
+
+### Independent UI review (this worktree)
+
+Production preview from this worktree:
+
+```sh
+npm run build
+PORT=5187 HOST=127.0.0.1 npm start
+```
+
+For hot-reload development instead, stop the production preview and use two terminals:
+
+```sh
+PORT=3017 npm run backend
+READER_BACKEND_PORT=3017 npm run dev -- --host 127.0.0.1 --port 5187 --strictPort
+```
+
+Open http://127.0.0.1:5187. The existing Kokoro endpoint on port 8000 is required for speech; no inference service or backend API was changed.
+
+Browser tests use UI 5197 / backend 3017, separate from the production preview on 5187. Override with `READER_UI_PORT` / `READER_BACKEND_PORT` if needed; occupied ports fail rather than reuse another server. For worktree-local transform/browser caches:
+
+```sh
+mkdir -p .ui-review/tmp
+TMPDIR="$PWD/.ui-review/tmp" npm run test:browser
+```
+
+Artifacts use `.ui-review/playwright/`. Tests cover URL-first initial state, article reveal only after successful extraction, extraction errors and manual fallback, keyboard/settings access at 1280/390/320px, extraction cancellation, and Stop → Read again (another TTS request, no re-extraction, edited text). The reveal tests measure intermediate URL positions, focus retention, no overflow, and immediate reduced-motion behavior. Their article/startup fixtures are explicitly synthetic; the console playback tests and existing public-URL test retain real Kokoro audio.
 
 The old browser-inference experiment remains in `main_.js`, but is not loaded by the app. Its unused `kokoro-js` dependency was removed from the active app; reinstall it separately if revisiting that experiment.
