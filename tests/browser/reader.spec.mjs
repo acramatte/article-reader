@@ -39,6 +39,7 @@ test("real public URL → Readability → Kokoro → continuously buffered playb
   await page.getByLabel("Webpage URL").fill("https://www.paulgraham.com/greatwork.html");
   await page.getByRole("button", { name: "Read article", exact: true }).click();
   await expect(page.locator("#article-title")).toHaveText("How to Do Great Work");
+  await page.getByText("Buffer & playback details", { exact: true }).click();
   await expect(page.locator("#first-audio")).not.toHaveText("—", { timeout: 60_000 });
   await expect.poll(async () => Number.parseFloat(await page.locator("#buffer").innerText()), { timeout: 60_000 }).toBeGreaterThan(30);
   await expect.poll(async () => Number.parseInt(await page.locator("#progress").innerText()), { timeout: 90_000 }).toBeGreaterThanOrEqual(2);
@@ -64,7 +65,7 @@ test("real public URL → Readability → Kokoro → continuously buffered playb
   await page.screenshot({ path: test.info().outputPath("desktop-playing.png"), fullPage: true });
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(page.locator("#status")).toHaveText("Stopped");
-  await expect(page.getByRole("button", { name: "Read article", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Read again", exact: true })).toBeEnabled();
   expect(errors).toEqual([]);
 });
 
@@ -72,23 +73,28 @@ test("mobile layout, real text narration, stop/restart and natural completion", 
   await page.setViewportSize({ width: 390, height: 844 });
   await probe(page);
   await page.goto("/");
+  await page.locator("#paste-fallback").click();
   await page.getByLabel("Extracted or pasted text").fill(paragraphs.join("\n\n"));
-  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await page.locator("#read-start").click();
   await expect(page.locator("#first-audio")).not.toHaveText("—", { timeout: 60_000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("mobile-playing.png"), fullPage: true });
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(page.locator("#status")).toHaveText("Stopped");
+  await expect(page.locator("#read-start")).toHaveText("Read again");
+  await page.screenshot({ path: test.info().outputPath("mobile-stopped.png"), fullPage: true });
+  await page.locator("#paste-fallback").click();
   await page.getByLabel("Extracted or pasted text").fill("This is a short test of the article reader. Thank you for listening.");
-  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await page.locator("#read-start").click();
   await expect(page.locator("#status")).toHaveText("Finished", { timeout: 30_000 });
   expect(await page.evaluate(() => window.__audio.context.state)).toBe("closed");
 });
 
 test("playback ticks preserve unchanged text nodes and disabled attributes", async ({ page }) => {
   await page.goto("/");
+  await page.locator("#paste-fallback").click();
   await page.getByLabel("Extracted or pasted text").fill(paragraphs[0]);
-  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await page.locator("#read-start").click();
   await expect(page.locator("#status")).toHaveText("Playing", { timeout: 30_000 });
 
   const observe = () => page.evaluate(async () => {
@@ -98,7 +104,7 @@ test("playback ticks preserve unchanged text nodes and disabled attributes", asy
     const mutations = [];
     const observer = new MutationObserver((records) => mutations.push(...records.map((record) => record.type)));
     for (const element of elements) observer.observe(element, { childList: true, characterData: true, subtree: true });
-    for (const id of ["read-url", "read-text", "voice", "speed", "url", "text", "pause", "stop"]) {
+    for (const id of ["read-start", "read-url", "paste-fallback", "voice", "speed", "url", "text", "pause", "stop"]) {
       observer.observe(document.getElementById(id), { attributes: true, attributeFilter: ["disabled"] });
     }
     const bufferBefore = document.getElementById("buffer").textContent;
@@ -134,8 +140,9 @@ test("simulated startup 503s show waking status and recover into real audio", as
     else await route.continue(); // Actual backend/Kokoro WAV, not synthetic audio.
   });
   await page.goto("/");
+  await page.locator("#paste-fallback").click();
   await page.getByLabel("Extracted or pasted text").fill("The speech engine can wake up and read this sentence.");
-  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await page.locator("#read-start").click();
   await expect(page.locator("#status")).toHaveText("Speech engine is waking up…");
   await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeEnabled();
   await page.screenshot({ path: test.info().outputPath("waking-up.png"), fullPage: true });
@@ -152,8 +159,9 @@ test("first-audio generation shares the spinner and clears it for playback", asy
   await page.route("**/api/tts", async (route) => { await pending; await route.continue(); });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
+  await page.locator("#paste-fallback").click();
   await page.getByLabel("Extracted or pasted text").fill("The reader shows a spinner while generating this first sentence.");
-  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await page.locator("#read-start").click();
   await expect(page.locator("#status")).toHaveText("Generating first audio…");
   await expect(page.locator("#status")).toHaveClass("is-busy");
   expect(await page.locator("#status").evaluate((element) => getComputedStyle(element.querySelector(".status-spinner"), "::before").animationName)).toBe("status-dots");
@@ -174,8 +182,9 @@ test("waking spinner animates without live-region mutations and respects reduced
   await page.route("**/api/tts", (route) => route.fulfill({ status: 503, contentType: "application/json", headers: { "Retry-After": "5" },
     body: JSON.stringify({ code: "INFERENCE_UNAVAILABLE" }) }));
   await page.goto("/");
+  await page.locator("#paste-fallback").click();
   await page.getByLabel("Extracted or pasted text").fill("This request deliberately simulates a sleeping endpoint.");
-  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await page.locator("#read-start").click();
   await expect(page.locator("#status")).toHaveText("Speech engine is waking up…");
   await expect(page.locator("#status")).toHaveClass("is-busy");
   await expect(page.locator(".status-spinner")).toHaveAttribute("aria-hidden", "true");
@@ -218,8 +227,9 @@ test("Stop during simulated startup cancels retry wait and permits a fresh sessi
     else await route.continue();
   });
   await page.goto("/");
+  await page.locator("#paste-fallback").click();
   await page.getByLabel("Extracted or pasted text").fill("Stop cancels waiting for the speech engine.");
-  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await page.locator("#read-start").click();
   await expect(page.locator("#status")).toHaveText("Speech engine is waking up…");
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(page.locator("#status")).toHaveText("Stopped");
@@ -227,7 +237,7 @@ test("Stop during simulated startup cancels retry wait and permits a fresh sessi
   await page.waitForTimeout(2300);
   expect(calls).toBe(stoppedCalls);
   starting = false;
-  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await page.locator("#read-start").click();
   await expect(page.locator("#status")).toHaveText("Finished", { timeout: 30_000 });
 });
 
@@ -236,9 +246,12 @@ test("private URL is blocked and extraction failure can recover with pasted text
   await page.getByLabel("Webpage URL").fill("http://127.0.0.1/secret");
   await page.getByRole("button", { name: "Read article", exact: true }).click();
   await expect(page.locator("#status")).toContainText("not allowed");
-  await expect(page.getByRole("button", { name: "Read text", exact: true })).toBeEnabled();
+  await expect(page.locator("#read-url")).toBeEnabled();
+  await expect(page.locator("#fallback-advice")).toBeVisible();
+  await expect(page.locator("#article-panel")).toBeHidden();
   await page.route("**/api/tts", (route) => route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: "Kokoro is unavailable." }) }));
+  await page.locator("#paste-fallback").click();
   await page.getByLabel("Extracted or pasted text").fill("An article can still be pasted here after a failed extraction.");
-  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await page.locator("#read-start").click();
   await expect(page.locator("#status")).toContainText("Kokoro is unavailable.");
 });
