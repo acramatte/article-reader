@@ -62,7 +62,7 @@ function setDisabled(element, disabled) {
 function showFeedback(message) {
   $("#listening-card").hidden = false;
   setText(statusText, message);
-  status.classList.remove("is-busy");
+  status.classList.remove("is-busy", "is-playing");
 }
 
 function render(update) {
@@ -88,6 +88,8 @@ function render(update) {
   setText(statusText, update.error ? `${state}: ${update.error}` : state);
   const busy = Boolean(active && (update.warming || ["loading", "generating"].includes(update.state)) && !update.paused && !update.error);
   if (status.classList.contains("is-busy") !== busy) status.classList.toggle("is-busy", busy);
+  const playing = Boolean(active && update.state === "playing" && update.bufferedSeconds >= 0.05 && !busy && !update.paused && !update.error);
+  if (status.classList.contains("is-playing") !== playing) status.classList.toggle("is-playing", playing);
   setText($("#buffer"), `${update.bufferedSeconds.toFixed(1)} s`);
   setText($("#progress"), `${update.completed} / ${update.total}`);
   setText($("#first-audio"), update.firstAudioSeconds === null ? "—" : `${update.firstAudioSeconds.toFixed(2)} s`);

@@ -44,7 +44,64 @@
       80% { content: "⠇"; }
       90% { content: "⠏"; }
     }
-    @media (prefers-reduced-motion: reduce) { #status.is-busy .status-spinner::before { animation: none; } }
+    .status-equalizer { display: none; }
+    #status.is-playing .status-equalizer {
+      display: inline-flex; align-items: end; gap: 1px; width: 15px; height: 15px;
+      margin-inline-start: .35em; color: #126b59; vertical-align: baseline;
+    }
+    .status-equalizer span {
+      flex: 1; height: 100%;
+      background: repeating-linear-gradient(to top, currentColor 0 3px, transparent 3px 4px);
+      animation: status-levels-a 1700ms step-end infinite;
+    }
+    .status-equalizer span:nth-child(2) { animation: status-levels-b 2300ms step-end infinite; clip-path: inset(4px 0 0); }
+    .status-equalizer span:nth-child(3) { animation: status-levels-c 1900ms step-end infinite; clip-path: inset(8px 0 0); }
+    .status-equalizer span:nth-child(4) { animation: status-levels-d 2900ms step-end infinite; clip-path: inset(0px 0 0); }
+    /* Independent rhythms and uneven peaks avoid a repeating left-to-right wave. */
+    @keyframes status-levels-a {
+      0%, 100% { clip-path: inset(12px 0 0); }
+      11% { clip-path: inset(4px 0 0); }
+      24% { clip-path: inset(8px 0 0); }
+      39% { clip-path: inset(0px 0 0); }
+      48% { clip-path: inset(12px 0 0); }
+      63% { clip-path: inset(8px 0 0); }
+      76% { clip-path: inset(8px 0 0); }
+      89% { clip-path: inset(4px 0 0); }
+    }
+    @keyframes status-levels-b {
+      0%, 100% { clip-path: inset(4px 0 0); }
+      9% { clip-path: inset(12px 0 0); }
+      22% { clip-path: inset(0px 0 0); }
+      37% { clip-path: inset(8px 0 0); }
+      51% { clip-path: inset(12px 0 0); }
+      64% { clip-path: inset(4px 0 0); }
+      79% { clip-path: inset(0px 0 0); }
+      91% { clip-path: inset(8px 0 0); }
+    }
+    @keyframes status-levels-c {
+      0%, 100% { clip-path: inset(8px 0 0); }
+      12% { clip-path: inset(4px 0 0); }
+      27% { clip-path: inset(12px 0 0); }
+      38% { clip-path: inset(4px 0 0); }
+      53% { clip-path: inset(0px 0 0); }
+      67% { clip-path: inset(8px 0 0); }
+      78% { clip-path: inset(4px 0 0); }
+      92% { clip-path: inset(12px 0 0); }
+    }
+    @keyframes status-levels-d {
+      0%, 100% { clip-path: inset(0px 0 0); }
+      7% { clip-path: inset(8px 0 0); }
+      19% { clip-path: inset(4px 0 0); }
+      31% { clip-path: inset(12px 0 0); }
+      46% { clip-path: inset(8px 0 0); }
+      58% { clip-path: inset(0px 0 0); }
+      73% { clip-path: inset(8px 0 0); }
+      87% { clip-path: inset(4px 0 0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #status.is-busy .status-spinner::before, #status .status-equalizer span { animation: none; }
+      .status-equalizer span:first-child { clip-path: inset(12px 0 0); }
+    }
     dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 0; }
     dt { font-size: 0.8rem; color: #53676b; }
     dd { margin: 6px 0 0; font-variant-numeric: tabular-nums; }
@@ -138,7 +195,7 @@
     <p id="fallback-advice" class="hint" hidden>This page could not be extracted. Try another URL, or use “Paste text instead” above.</p>
     <div class="console-heading">
       <h2 id="listen-title" hidden>Listen</h2>
-      <p id="status" role="status" aria-live="polite"><span id="status-text"></span><span class="status-spinner" aria-hidden="true"></span></p>
+      <p id="status" role="status" aria-live="polite"><span id="status-text"></span><span class="status-spinner" aria-hidden="true"></span><span class="status-equalizer" aria-hidden="true"><span></span><span></span><span></span><span></span></span></p>
     </div>
     <div id="playback" hidden>
       <div class="transport" role="group" aria-label="Playback controls">
