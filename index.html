@@ -117,7 +117,8 @@
     .url-action { display: flex; gap: 8px; padding: 8px; border: 1px solid #93a7a1; border-radius: 16px; background: white; box-shadow: 0 8px 28px #172c3108; }
     #url { flex: 1; min-width: 0; border: 0; font-size: 1.1rem; padding: 14px; min-height: 54px; background: white; }
     #read-url { padding: 12px 22px; font-weight: 650; border-radius: 10px; }
-    .fallback-link { background: transparent; border: 0; color: #53676b; text-decoration: underline; text-underline-offset: 3px; margin-top: 8px; }
+    .source-utilities { display: grid; width: 100%; max-width: var(--url-width); margin: 8px auto 0; text-align: left; }
+    .fallback-link { grid-area: 1 / 1; justify-self: start; align-self: start; z-index: 1; background: transparent; border: 0; color: #53676b; text-decoration: underline; text-underline-offset: 3px; padding: 10px 0; font-size: .85rem; }
     .fallback-link.recommended { color: #126b59; font-weight: 650; }
     .is-revealed .hero { padding-top: 24px; padding-bottom: 8px; }
     .hero-copy { display: grid; grid-template-rows: 1fr; opacity: 1; visibility: visible; transition: grid-template-rows 650ms ease, opacity 650ms ease, visibility 650ms; }
@@ -142,8 +143,10 @@
     details { border-top: 1px solid #e3ebe7; padding: 12px 0; }
     summary { cursor: pointer; font-size: 0.9rem; color: #53676b; min-height: 28px; }
     details:last-child { padding-bottom: 0; }
-    .hero .settings { max-width: 400px; margin: 12px auto 0; border: 0; padding-top: 0; text-align: left; }
-    .hero .settings summary { text-align: center; font-size: .85rem; min-height: 44px; padding: 10px 0; }
+    .hero .settings { grid-area: 1 / 1; min-width: 0; margin: 0; border: 0; padding: 0; text-align: left; }
+    .hero .settings summary { width: max-content; margin-left: auto; font-size: .85rem; min-height: 44px; padding: 10px 0; }
+    .settings-panel { padding: 12px 0; border-top: 1px solid #d2dfdb; }
+    .settings-panel .row { margin-top: 0; }
     .settings label { font-size: 0.85rem; }
     .settings select { min-height: 40px; padding: 6px 10px; }
     [hidden] { display: none !important; }
@@ -151,9 +154,8 @@
       body { padding: 0 16px; }
       section { padding: 16px; }
       .hero { padding-top: clamp(56px, 12vh, 110px); }
-      .url-action { flex-wrap: wrap; }
-      #url { flex-basis: 100%; width: 100%; padding: 12px 8px; }
-      #read-url { width: 100%; }
+      #url { padding: 12px 8px; font-size: 1rem; }
+      #read-url { flex-shrink: 0; padding: 12px 16px; }
       .intro { font-size: 1rem; margin-bottom: 24px; }
       dl { grid-template-columns: repeat(2, 1fr); }
       .transport { flex-wrap: wrap; }
@@ -177,20 +179,23 @@
       <form id="url-form">
         <label for="url">Webpage URL</label>
         <div class="url-action">
-          <input id="url" type="url" placeholder="Paste an article link here…" required aria-describedby="url-hint" />
-          <button id="read-url" type="submit">Read article</button>
+          <input id="url" type="url" placeholder="Paste an article link…" required />
+          <button id="read-url" type="submit">Read</button>
         </div>
-        <p id="url-hint" class="hint">Extracts the article and starts narration automatically.</p>
       </form>
-      <button id="paste-fallback" type="button" class="fallback-link" aria-controls="workspace" aria-expanded="false">Can't extract a page? Paste text instead</button>
-    <details id="voice-settings" class="settings">
-      <summary>Voice &amp; speed <span id="settings-summary">· Heart · 1×</span></summary>
-      <div class="row">
-        <div><label for="voice">Voice</label><select id="voice"><option value="af_heart">Heart</option><option value="af_bella">Bella</option><option value="af_nicole">Nicole</option></select></div>
-        <div><label for="speed">Narration speed</label><select id="speed"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.2">1.2×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></div>
+      <div class="source-utilities">
+        <button id="paste-fallback" type="button" class="fallback-link" aria-controls="workspace" aria-expanded="false">Paste text instead</button>
+        <details id="voice-settings" class="settings">
+          <summary aria-label="Voice and speed: Heart · 1×"><span id="settings-summary">Heart · 1×</span></summary>
+          <div class="settings-panel">
+            <div class="row">
+              <div><label for="voice">Voice</label><select id="voice"><option value="af_heart">Heart</option><option value="af_bella">Bella</option><option value="af_nicole">Nicole</option></select></div>
+              <div><label for="speed">Narration speed</label><select id="speed"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.2">1.2×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></div>
+            </div>
+            <p class="hint">Stop to change these settings. English voices; fixed for each narration.</p>
+          </div>
+        </details>
       </div>
-      <p class="hint">Stop to change these settings. English voices; fixed for each narration.</p>
-    </details>
     </header>
   <section id="listening-card" class="console" aria-label="Listening controls" hidden>
     <p id="fallback-advice" class="hint" hidden>This page could not be extracted. Try another URL, or use “Paste text instead” above.</p>

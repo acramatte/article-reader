@@ -36,7 +36,7 @@ npm run build
 npm start
 ```
 
-Open **http://127.0.0.1:3001**, paste a link and click **Read article**. Narration starts automatically and the extracted article appears below. If extraction fails, choose **Paste text instead**.
+Open **http://127.0.0.1:3001**, paste a link and click **Read**. Narration starts automatically and the extracted article appears below. If extraction fails, choose **Paste text instead**.
 
 The Listen card provides **Read again**, **Pause/Resume** and **Stop**. After stopping, use **Edit article text** to make changes; **Read again** generates fresh narration from that text without fetching the URL again. Voice/speed settings and buffer diagnostics are collapsible. English voices currently available: Heart, Bella and Nicole. Voice and synthesis speed are fixed for each listening session.
 
