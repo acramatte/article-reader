@@ -11,6 +11,7 @@ let active = false;
 let source = "url";
 let hasReadText = false;
 let sessionHasText = false;
+let pauseAnimations = [];
 
 function renderSource() {
   // Keep the same URL input mounted and focusable throughout the reveal.
@@ -62,7 +63,9 @@ function setDisabled(element, disabled) {
 function showFeedback(message) {
   $("#listening-card").hidden = false;
   setText(statusText, message);
-  status.classList.remove("is-busy", "is-playing");
+  for (const animation of pauseAnimations) animation.cancel();
+  pauseAnimations = [];
+  status.classList.remove("is-busy", "is-playing", "is-paused");
 }
 
 function render(update) {
@@ -89,7 +92,21 @@ function render(update) {
   const busy = Boolean(active && (update.warming || ["loading", "generating"].includes(update.state)) && !update.paused && !update.error);
   if (status.classList.contains("is-busy") !== busy) status.classList.toggle("is-busy", busy);
   const playing = Boolean(active && update.state === "playing" && update.bufferedSeconds >= 0.05 && !busy && !update.paused && !update.error);
+  const paused = Boolean(active && update.paused && !update.error);
+  const pauseChanged = status.classList.contains("is-paused") !== paused;
+  // Capture the visible frame before removing the playback CSS animations.
+  const fallingBars = pauseChanged && paused && status.classList.contains("is-playing") && !matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? [...status.querySelectorAll(".status-equalizer span")].map((bar) => ({ bar, clip: getComputedStyle(bar).clipPath })) : [];
+  if (pauseChanged) {
+    for (const animation of pauseAnimations) animation.cancel();
+    pauseAnimations = [];
+  }
   if (status.classList.contains("is-playing") !== playing) status.classList.toggle("is-playing", playing);
+  if (pauseChanged) status.classList.toggle("is-paused", paused);
+  pauseAnimations = fallingBars.length ? fallingBars.map(({ bar, clip }) => bar.animate(
+    [{ clipPath: clip }, { clipPath: "inset(12px 0px 0px)" }],
+    { duration: 450, easing: "ease-out" },
+  )) : pauseAnimations;
   setText($("#buffer"), `${update.bufferedSeconds.toFixed(1)} s`);
   setText($("#progress"), `${update.completed} / ${update.total}`);
   setText($("#first-audio"), update.firstAudioSeconds === null ? "—" : `${update.firstAudioSeconds.toFixed(2)} s`);

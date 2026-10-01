@@ -111,6 +111,7 @@ test("listening card keeps its responsive width when playback details are toggle
     await page.locator("#paste-fallback").click();
     // Show the real diagnostics markup without requiring speech inference.
     await page.locator("#diagnostics").evaluate((details) => { details.hidden = false; });
+    await expect(page.locator("#diagnostics")).toHaveCSS("border-top-width", "0px");
     const card = page.locator("#listening-card");
     const closedWidth = (await card.boundingBox()).width;
     const readerWidth = (await page.locator("#reader").boundingBox()).width;
