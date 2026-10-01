@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Article Reader</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="theme-color" content="#126b59" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Article Reader" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   <style>
     :root { --content-width: 700px; --url-width: 800px; color-scheme: light; font: 16px system-ui, sans-serif; color: #172c31; background: #f3f6f5; }
     * { box-sizing: border-box; }
@@ -166,6 +170,7 @@
 </head>
 <body>
   <main id="reader">
+  <p id="offline-notice" role="status" hidden>You’re offline. Article extraction and speech generation need an internet connection.</p>
     <header class="hero" aria-label="Article reader">
       <div class="hero-copy">
         <div class="hero-copy-inner">

@@ -1,6 +1,15 @@
 import { chunkText } from "./chunks.mjs";
 import { Narrator } from "./narrator.mjs";
 import { synthesizeSpeech } from "./tts-client.mjs";
+import { registerSW } from "virtual:pwa-register";
+
+// Progressive enhancement: registration failures must not prevent ordinary browser use.
+registerSW({ onRegisterError: (error) => console.warn("PWA registration failed:", error) });
+const offlineNotice = document.querySelector("#offline-notice");
+const renderConnectivity = () => { offlineNotice.hidden = navigator.onLine; };
+window.addEventListener("online", renderConnectivity);
+window.addEventListener("offline", renderConnectivity);
+renderConnectivity();
 
 const $ = (selector) => document.querySelector(selector);
 const textArea = $("#text");

@@ -31,6 +31,8 @@ jobs:
           npm ci --include=dev
           npm test
           npm run build
+          npx playwright install --with-deps chromium
+          npm run test:pwa
       - name: Build and smoke-test image
         run: |
           docker build --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" --label "org.opencontainers.image.revision=${GITHUB_SHA}" -t article-reader:ci .

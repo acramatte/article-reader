@@ -46,7 +46,11 @@ Binding a destination IP is not an ingress-interface firewall rule. Verify Docke
 3. Inference accepts the authorized VPS credential and rejects missing/invalid credentials.
 4. Zaimutomo at `10.0.0.1:8083` still works unchanged.
 
-`http://10.0.0.1:8084` is the initial VPN-only reader address. WireGuard encrypts the device-to-VPS link; the current AudioContext player does not generally require HTTPS. Test physical phone/browser playback rather than assuming compatibility. A remote HTTP address is not a browser secure context, so future service-worker/offline or AudioWorklet streaming features may require HTTPS. A private-resolving hostname with a trusted certificate can be added later without making the reader public. HTTPS/reverse-proxy setup is explicitly deferred; do not change the existing Kamal proxy for this deployment.
+`http://10.0.0.1:8084` remains usable as an ordinary VPN-only web page, but **PWA installation and service workers require trusted HTTPS on the phone**. WireGuard encryption does not make a remote HTTP origin a browser secure context. Use a private-resolving hostname with a phone-trusted certificate and an HTTPS reverse proxy to this reader, preserving VPN-only ingress; do not make the app public just to obtain installation support. Localhost is a secure-context exception only on the device running the browser, not when a phone opens the server's LAN IP. Actual certificate/proxy provisioning remains a separate deployment task; do not change the existing Kamal proxy implicitly.
+
+Serve the app at the origin root (manifest start URL and scope are `/`). Forward `/manifest.webmanifest`, `/sw.js`, `/workbox-*.js`, `/icons/`, `/apple-touch-icon.png` and the hashed `/assets/` files without authentication redirects to HTML or MIME rewriting. The Node backend sets the correct manifest/PNG/JavaScript content types and `Cache-Control: no-cache` for static responses; avoid overriding the worker or HTML with long-lived proxy caching. Preserve the existing access-control boundary. Test Android installation and standalone launch on the real HTTPS deployment, plus physical phone playback rather than assuming compatibility.
+
+The worker precaches only the app shell and brand assets. API routes remain network-only, and offline launch does not provide offline extraction or narration. New workers activate only after all reader windows/tabs close, so deployments do not forcibly reload active playback. No VPS/proxy changes are performed by adding PWA support.
 
 ## Watchtower and rollback
 
