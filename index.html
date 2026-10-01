@@ -7,7 +7,8 @@
   <style>
     :root { color-scheme: light; font: 16px system-ui, sans-serif; color: #172c31; background: #f3f6f5; }
     * { box-sizing: border-box; }
-    body { max-width: 920px; margin: 0 auto; padding: 0 24px 40px; overflow-anchor: none; }
+    body { display: flex; flex-direction: column; min-height: 100vh; max-width: 920px; margin: 0 auto; padding: 0 24px; overflow-anchor: none; }
+    #reader { display: flex; flex: 1; flex-direction: column; }
     .eyebrow { margin: 0; color: #126b59; text-transform: uppercase; letter-spacing: .12em; font-size: .75rem; font-weight: 700; line-height: 1.6; }
     h1 { margin: 22px 0 18px; font-size: clamp(2.1rem, 5vw, 3.6rem); line-height: 1.12; letter-spacing: -.045em; transition: font-size 650ms ease, margin 650ms ease; }
     .intro, #byline { color: #53676b; }
@@ -48,7 +49,7 @@
     dt { font-size: 0.8rem; color: #53676b; }
     dd { margin: 6px 0 0; font-variant-numeric: tabular-nums; }
     #source { overflow-wrap: anywhere; color: #126b59; }
-    footer { margin-top: 28px; padding-top: 14px; border-top: 1px solid #d2dfdb; color: #53676b; font-size: 0.85rem; }
+    footer { margin-top: auto; padding: 14px 0; border-top: 1px solid #d2dfdb; color: #53676b; font-size: 0.85rem; text-align: center; }
     #article-title { margin-top: 0; }
     .hint { font-size: 0.85rem; color: #53676b; }
     .hero { padding: clamp(64px, 16vh, 160px) 0 28px; text-align: center; transition: padding 650ms cubic-bezier(.22, 1, .36, 1); }
@@ -88,7 +89,7 @@
     .settings select { min-height: 40px; padding: 6px 10px; }
     [hidden] { display: none !important; }
     @media (max-width: 520px) {
-      body { padding: 0 16px 24px; }
+      body { padding: 0 16px; }
       section { padding: 16px; }
       .hero { padding-top: clamp(56px, 12vh, 110px); }
       .url-action { flex-wrap: wrap; }
