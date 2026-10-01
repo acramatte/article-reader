@@ -4,6 +4,8 @@
 !package.json
 !package-lock.json
 !index.html
+!public/
+!public/**
 !main.js
 !narrator.mjs
 !chunks.mjs

@@ -26,6 +26,11 @@ try {
   const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(match => match[1]);
   assert.ok(assets.length > 0, "Production assets missing");
   for (const asset of assets) assert.equal((await fetch(base + asset)).status, 200);
+  assert.match(html, /<link\s+rel="icon"\s+type="image\/svg\+xml"\s+href="\/favicon\.svg"/);
+  const favicon = await fetch(`${base}/favicon.svg`);
+  assert.equal(favicon.status, 200);
+  assert.equal(favicon.headers.get("content-type"), "image/svg+xml");
+  assert.match(await favicon.text(), /<svg\s[^>]*viewBox="0 0 32 32"/);
   const post = url => fetch(`${base}/api/article`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
   const blocked = await post("http://127.0.0.1/");
