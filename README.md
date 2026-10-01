@@ -40,6 +40,14 @@ Open **http://127.0.0.1:3001**, paste a link and click **Read article**. Narrati
 
 The Listen card provides **Read again**, **Pause/Resume** and **Stop**. After stopping, use **Edit article text** to make changes; **Read again** generates fresh narration from that text without fetching the URL again. Voice/speed settings and buffer diagnostics are collapsible. English voices currently available: Heart, Bella and Nicole. Voice and synthesis speed are fixed for each listening session.
 
+### Install on your phone
+
+The production reader is a Progressive Web App (PWA). On **Android Chrome**, open the reader, choose **Install app** (or **Add to Home screen**) from the browser menu, and launch its home-screen icon. It opens in a standalone window without the browser URL bar. On **iPhone/iPad Safari**, choose **Share → Add to Home Screen**, keeping **Open as Web App** enabled when offered. Android and Apple icons use the reader’s green equalizer mark.
+
+**Installation requires a trusted HTTPS URL** on your phone. Plain HTTP over a LAN or WireGuard IP is not sufficient; localhost is an exception only on the device running the browser. Keep access behind the existing VPN/access-control layer while adding HTTPS. The ordinary web page remains usable when service workers are unavailable.
+
+Only the app shell and icons are cached so the installed app can open offline. An offline notice explains that extracting articles and generating speech still require a connection; articles, URLs, API responses and audio are not stored in the service-worker cache. Installing does not add saved articles, offline narration, lock-screen controls or guaranteed background playback. Updates wait until all reader windows/tabs close rather than reloading an active listening session.
+
 ### Hosting and phone access
 
 To use the reader from a phone, run it on a computer or server the phone can reach. Bind the app with `HOST=0.0.0.0 npm start` and use an **HTTPS reverse proxy** for access beyond your trusted network. The phone only needs a browser; it doesn't run the speech service.
@@ -104,6 +112,14 @@ npm run test:browser
 ```
 
 The browser suite starts dedicated servers on UI port 5197 and backend port 3017; override them with `READER_UI_PORT` and `READER_BACKEND_PORT`. Occupied ports fail rather than reuse another server. Traces and screenshots go to `.ui-review/playwright/`.
+
+The production PWA checks do not need Kokoro or internet article fixtures:
+
+```sh
+npm run test:pwa
+```
+
+They build and serve the production UI on port 5297 (`READER_PWA_PORT` overrides it), then validate Chromium installability, Android/Apple icon decoding and maskable safe zones, service-worker control, offline shell/reconnection, network-only API behavior and fallback without service workers. CI runs this suite and checks PWA assets in the Docker image. Regenerate the committed PNG icons with `npm run icons:pwa` (requires Playwright Chromium).
 
 Tests require local Kokoro and internet access to `https://www.paulgraham.com/greatwork.html` for real article/audio checks. They cover scheduling, playback controls, completion, URL-first layout, extraction errors, manual fallback, editing/re-reading without re-extraction, keyboard access and responsive/reduced-motion behavior. Some article/startup fixtures and the TTS error path are deliberately synthetic; playback checks retain real Kokoro audio. Headless checks don't establish narration quality or reliable background playback on physical phones.
 

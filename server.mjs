@@ -95,8 +95,8 @@ export function createApp({
       const path = resolve(root, `.${decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname)}`);
       if (!path.startsWith(root + sep)) return json(403, { error: "Forbidden." });
       const content = await readFile(path);
-      const type = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" }[extname(path)] || "application/octet-stream";
-      response.writeHead(200, { "Content-Type": type, "X-Content-Type-Options": "nosniff" });
+      const type = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".webmanifest": "application/manifest+json" }[extname(path)] || "application/octet-stream";
+      response.writeHead(200, { "Content-Type": type, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-cache" });
       response.end(content);
     } catch (error) {
       if (controller.signal.aborted) return;

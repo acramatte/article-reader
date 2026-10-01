@@ -31,6 +31,24 @@ try {
   assert.equal(favicon.status, 200);
   assert.equal(favicon.headers.get("content-type"), "image/svg+xml");
   assert.match(await favicon.text(), /<svg\s[^>]*viewBox="0 0 32 32"/);
+  const manifestResponse = await fetch(`${base}/manifest.webmanifest`);
+  assert.equal(manifestResponse.status, 200);
+  assert.equal(manifestResponse.headers.get("content-type"), "application/manifest+json");
+  const manifest = await manifestResponse.json();
+  assert.equal(manifest.display, "standalone");
+  for (const path of [...manifest.icons.map(icon => icon.src), "/apple-touch-icon.png"]) {
+    const icon = await fetch(base + path);
+    assert.equal(icon.status, 200);
+    assert.equal(icon.headers.get("content-type"), "image/png");
+    assert.equal(Buffer.from(await icon.arrayBuffer()).subarray(1, 4).toString(), "PNG");
+  }
+  const worker = await fetch(`${base}/sw.js`);
+  assert.equal(worker.status, 200);
+  assert.equal(worker.headers.get("content-type"), "text/javascript");
+  assert.equal(worker.headers.get("cache-control"), "no-cache");
+  const workbox = (await worker.text()).match(/"(\.\/workbox-[^"]+)"/);
+  assert.ok(workbox, "Workbox runtime missing");
+  assert.equal((await fetch(new URL(`${workbox[1]}.js`, base))).status, 200);
   const post = url => fetch(`${base}/api/article`, { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
   const blocked = await post("http://127.0.0.1/");
@@ -43,7 +61,7 @@ try {
     assert.ok(body.title && body.text.length > 100);
     console.log(`Real extraction: ${body.title}, ${body.text.length} characters`);
   }
-  console.log("Container smoke passed: health, non-root user, production assets, SSRF rejection under runtime limits. TTS not exercised.");
+  console.log("Container smoke passed: health, non-root user, production/PWA assets, SSRF rejection under runtime limits. TTS not exercised.");
 } finally {
   docker("stop", id);
 }
