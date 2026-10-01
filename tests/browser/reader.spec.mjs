@@ -85,6 +85,45 @@ test("mobile layout, real text narration, stop/restart and natural completion", 
   expect(await page.evaluate(() => window.__audio.context.state)).toBe("closed");
 });
 
+test("playback ticks preserve unchanged text nodes and disabled attributes", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Extracted or pasted text").fill(paragraphs[0]);
+  await page.getByRole("button", { name: "Read text", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Playing", { timeout: 30_000 });
+
+  const observe = () => page.evaluate(async () => {
+    const ids = ["status", "pause", "progress", "first-audio", "underruns"];
+    const elements = ids.map((id) => document.getElementById(id));
+    const children = elements.map((element) => element.firstChild);
+    const mutations = [];
+    const observer = new MutationObserver((records) => mutations.push(...records.map((record) => record.type)));
+    for (const element of elements) observer.observe(element, { childList: true, characterData: true, subtree: true });
+    for (const id of ["read-url", "read-text", "voice", "speed", "url", "text", "pause", "stop"]) {
+      observer.observe(document.getElementById(id), { attributes: true, attributeFilter: ["disabled"] });
+    }
+    const bufferBefore = document.getElementById("buffer").textContent;
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    observer.disconnect();
+    return { mutations, sameTextNodes: elements.every((element, i) => element.firstChild === children[i]),
+      bufferBefore, bufferAfter: document.getElementById("buffer").textContent };
+  });
+
+  const playing = await observe();
+  expect(playing.mutations).toEqual([]);
+  expect(playing.sameTextNodes).toBe(true);
+  expect(playing.bufferAfter).not.toBe(playing.bufferBefore);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Paused");
+  const paused = await observe();
+  expect(paused.mutations).toEqual([]);
+  expect(paused.sameTextNodes).toBe(true);
+  expect(paused.bufferAfter).toBe(paused.bufferBefore);
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Playing");
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
+});
+
 test("private URL is blocked and extraction failure can recover with pasted text", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Webpage URL").fill("http://127.0.0.1/secret");

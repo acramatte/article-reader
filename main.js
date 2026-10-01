@@ -17,19 +17,27 @@ async function post(path, body, signal) {
   return response;
 }
 
+function setText(element, text) {
+  if (element.textContent !== text) element.textContent = text;
+}
+
+function setDisabled(element, disabled) {
+  if (element.disabled !== disabled) element.disabled = disabled;
+}
+
 function render(update) {
   const active = !["stopped", "finished", "error"].includes(update.state);
-  for (const selector of ["#read-url", "#read-text", "#voice", "#speed", "#url", "#text"]) $(selector).disabled = active;
-  $("#stop").disabled = !active;
-  $("#pause").disabled = !active || update.state === "loading";
-  $("#pause").textContent = update.paused ? "Resume" : "Pause";
+  for (const selector of ["#read-url", "#read-text", "#voice", "#speed", "#url", "#text"]) setDisabled($(selector), active);
+  setDisabled($("#stop"), !active);
+  setDisabled($("#pause"), !active || update.state === "loading");
+  setText($("#pause"), update.paused ? "Resume" : "Pause");
   const labels = { loading: "Fetching and extracting article…", generating: "Generating first audio…", playing: "Playing", stopped: "Stopped", finished: "Finished", error: "Could not read article" };
   const state = update.paused ? "Paused" : update.state === "playing" && update.bufferedSeconds < 0.05 ? "Buffering…" : labels[update.state];
-  status.textContent = update.error ? `${state}: ${update.error}` : state;
-  $("#buffer").textContent = `${update.bufferedSeconds.toFixed(1)} s`;
-  $("#progress").textContent = `${update.completed} / ${update.total}`;
-  $("#first-audio").textContent = update.firstAudioSeconds === null ? "—" : `${update.firstAudioSeconds.toFixed(2)} s`;
-  $("#underruns").textContent = String(update.underruns);
+  setText(status, update.error ? `${state}: ${update.error}` : state);
+  setText($("#buffer"), `${update.bufferedSeconds.toFixed(1)} s`);
+  setText($("#progress"), `${update.completed} / ${update.total}`);
+  setText($("#first-audio"), update.firstAudioSeconds === null ? "—" : `${update.firstAudioSeconds.toFixed(2)} s`);
+  setText($("#underruns"), String(update.underruns));
 }
 
 function read(fromUrl) {
