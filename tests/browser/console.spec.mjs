@@ -70,7 +70,7 @@ test("URL-first landing, fallback and compact settings are keyboard reachable at
     await expect(page.locator("#article-panel")).toBeHidden();
     await expect(page.locator("#listening-card")).toBeHidden();
     await expect(page.getByText("Ready when you are.", { exact: true })).toHaveCount(0);
-    await expect(page.locator("#voice-settings summary")).toHaveText("Voice & speed · Heart · 1×");
+    await expect(page.locator("#voice-settings summary")).toHaveText("Heart · 1×");
     await expect(page.locator("#playback")).toBeHidden();
     await expect(page.locator("#diagnostics")).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -93,7 +93,7 @@ test("URL-first landing, fallback and compact settings are keyboard reachable at
     await expect(page.locator("#voice")).toBeFocused();
     await page.locator("#voice").selectOption("af_bella");
     await page.locator("#speed").selectOption("1.2");
-    await expect(page.locator("#settings-summary")).toHaveText("· Bella · 1.2×");
+    await expect(page.locator("#settings-summary")).toHaveText("Bella · 1.2×");
     await page.locator("#text").fill("Pasted text is a fallback, not an extracted article.");
     await expect(page.locator("#read-start")).toHaveText("Read text");
     await expect(page.locator("#article-panel")).toBeHidden();
@@ -139,7 +139,7 @@ test("Stop during URL extraction cancels the pending article and keeps URL retry
   await expect(page.locator("#reader")).not.toHaveClass("is-revealed");
   await expect(page.locator("#pause")).toBeDisabled();
   await page.locator("#stop").click();
-  await expect(page.locator("#read-url")).toHaveText("Read article");
+  await expect(page.locator("#read-url")).toHaveText("Read");
   await expect(page.locator("#read-url")).toBeFocused();
   await expect(page.locator("#playback")).toBeHidden();
   release();

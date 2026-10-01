@@ -144,6 +144,14 @@ function read(fromUrl) {
   } catch (error) { showFeedback(error.message); }
 }
 
+const compactViewport = window.matchMedia("(max-width: 520px)");
+const desktopUrlPlaceholder = $("#url").placeholder;
+function updateUrlPlaceholder() {
+  $("#url").placeholder = compactViewport.matches ? "Paste a link…" : desktopUrlPlaceholder;
+}
+compactViewport.addEventListener("change", updateUrlPlaceholder);
+updateUrlPlaceholder();
+
 $("#url-form").addEventListener("submit", (event) => { event.preventDefault(); read(true); });
 $("#read-start").addEventListener("click", () => read(false));
 $("#paste-fallback").addEventListener("click", openFallback);
@@ -158,7 +166,9 @@ textArea.addEventListener("input", () => {
   renderSource();
 });
 function updateSettingsSummary() {
-  setText($("#settings-summary"), `· ${$("#voice").selectedOptions[0].textContent} · ${$("#speed").selectedOptions[0].textContent}`);
+  const selection = `${$("#voice").selectedOptions[0].textContent} · ${$("#speed").selectedOptions[0].textContent}`;
+  setText($("#settings-summary"), selection);
+  $("#voice-settings summary").setAttribute("aria-label", `Voice and speed: ${selection}`);
 }
 for (const id of ["#voice", "#speed"]) $(id).addEventListener("change", updateSettingsSummary);
 updateSettingsSummary();

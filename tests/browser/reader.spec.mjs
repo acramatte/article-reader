@@ -37,7 +37,7 @@ test("real public URL → Readability → Kokoro → continuously buffered playb
   await probe(page);
   await page.goto("/");
   await page.getByLabel("Webpage URL").fill("https://www.paulgraham.com/greatwork.html");
-  await page.getByRole("button", { name: "Read article", exact: true }).click();
+  await page.getByRole("button", { name: "Read", exact: true }).click();
   await expect(page.locator("#article-title")).toHaveText("How to Do Great Work");
   await page.getByText("Buffer & playback details", { exact: true }).click();
   await expect(page.locator("#first-audio")).not.toHaveText("—", { timeout: 60_000 });
@@ -244,7 +244,7 @@ test("Stop during simulated startup cancels retry wait and permits a fresh sessi
 test("private URL is blocked and extraction failure can recover with pasted text", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Webpage URL").fill("http://127.0.0.1/secret");
-  await page.getByRole("button", { name: "Read article", exact: true }).click();
+  await page.getByRole("button", { name: "Read", exact: true }).click();
   await expect(page.locator("#status")).toContainText("not allowed");
   await expect(page.locator("#read-url")).toBeEnabled();
   await expect(page.locator("#fallback-advice")).toBeVisible();
