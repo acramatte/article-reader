@@ -3,7 +3,7 @@ FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd3
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --include=dev
-COPY index.html main.js narrator.mjs chunks.mjs tts-client.mjs vite.config.js ./
+COPY index.html main.js stream-player.mjs vite.config.js ./
 COPY public/ ./public/
 RUN npm run build
 
@@ -11,8 +11,10 @@ FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd3
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3001
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
-COPY server.mjs article.mjs ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force \
+    && apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+COPY server.mjs article.mjs streaming-server.mjs streaming.mjs streaming-api.mjs tts-provider.mjs chunks.mjs tts-client.mjs ./
 COPY --from=build /app/dist ./dist
 USER node
 EXPOSE 3001

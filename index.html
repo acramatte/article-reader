@@ -218,11 +218,11 @@
       <summary>Buffer &amp; playback details</summary>
       <dl>
         <div><dt>Audio buffered</dt><dd id="buffer">0.0 s</dd></div>
-        <div><dt>Chunks played</dt><dd id="progress">0 / 0</dd></div>
-        <div><dt>First audio scheduled</dt><dd id="first-audio">—</dd></div>
+        <div><dt>Prepared chunks</dt><dd id="progress">0 / 0</dd></div>
+        <div><dt>First playback</dt><dd id="first-audio">—</dd></div>
         <div><dt>Buffer underruns</dt><dd id="underruns">0</dd></div>
       </dl>
-      <p class="hint">Buffers about 45 seconds ahead. Keep this tab open while listening.</p>
+      <p class="hint">Audio streams while the server prepares the article. After a reload, use Resume to recover your saved recording and position.</p>
     </details>
   </section>
   <div id="workspace" hidden>
@@ -239,6 +239,9 @@
       <p class="hint">Stop to edit. Then use Read again in the listening card to generate narration from the beginning.</p>
     </details>
   </div>
+  <audio id="narration-audio" preload="none" hidden></audio>
+  <p id="recovery-note" role="status" hidden></p>
+  <button id="reconnect" class="secondary" type="button" hidden>Retry connection</button>
   <footer>© 2026 Alexis Cramatte</footer>
   </main>
   <script type="module" src="/main.js"></script>

@@ -10,7 +10,7 @@ test("URL auto-start, pause/resume, Stop → Read again generates the editor tex
     extractions++;
     return route.fulfill({ json: { title: "A simpler listening space", byline: "Reader fixture", url: "https://example.com/article", text: articleText } });
   });
-  await page.route("**/api/tts", (route) => {
+  await page.route("**/api/streaming", (route) => {
     requests.push(route.request().postDataJSON());
     return route.continue();
   });
@@ -44,6 +44,7 @@ test("URL auto-start, pause/resume, Stop → Read again generates the editor tex
   expect(requests).toHaveLength(2);
   expect(requests[1]).toEqual(requests[0]);
   await page.locator("#stop").click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
   const edited = "Edited text is used for the next narration, rather than saved audio.";
   await page.locator("#editor-summary").click();
   await page.locator("#text").fill(edited);

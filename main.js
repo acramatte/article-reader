@@ -1,6 +1,8 @@
-import { chunkText } from "./chunks.mjs";
-import { Narrator } from "./narrator.mjs";
-import { synthesizeSpeech } from "./tts-client.mjs";
+import { StreamingPlayer } from "./stream-player.mjs";
+import { PlaybackBookmark } from "./public/streaming-state.js";
+
+// Bundle the same validated bookmark used by the diagnostic player.
+const bookmarkReady = Promise.resolve(new PlaybackBookmark());
 
 const $ = (selector) => document.querySelector(selector);
 const textArea = $("#text");
@@ -68,6 +70,18 @@ function showFeedback(message) {
   status.classList.remove("is-busy", "is-playing", "is-paused");
 }
 
+function playbackLabel(update) {
+  if (update.recovering) {
+    return { connection: "Reconnecting to your recording…", generation: "Recording is still generating. Waiting to restore the saved position…", position: "Restoring your saved position…" }[update.recoveryPhase];
+  }
+  if (update.needsGesture) return "Tap Resume to start audio.";
+  if (update.recovered && update.paused && update.firstAudioSeconds === null) return "Saved recording ready. Press Resume.";
+  if (update.paused) return "Paused";
+  if (update.warming) return "Speech engine is waking up…";
+  if (update.state === "playing" && update.bufferedSeconds < 0.05) return "Buffering…";
+  return { loading: source === "url" ? "Fetching and extracting article…" : "Preparing narration…", generating: "Generating first audio…", playing: "Playing", stopping: "Stopping…", stopped: "Stopped", finished: "Finished", error: "Could not read article" }[update.state];
+}
+
 function render(update) {
   $("#listening-card").hidden = false;
   active = !["stopped", "finished", "error"].includes(update.state);
@@ -79,16 +93,18 @@ function render(update) {
   if (!hasPlayback) $("#diagnostics").hidden = true;
   for (const selector of ["#voice", "#speed", "#text"]) setDisabled($(selector), active);
   setDisabled($("#read-start"), active || (source === "url" && !sessionHasText));
-  const extractionError = update.state === "error" && source === "url" && !sessionHasText;
+  const extractionError = update.state === "error" && source === "url" && !sessionHasText && !update.recovered;
   if ($("#fallback-advice").hidden !== !extractionError) $("#fallback-advice").hidden = !extractionError;
   if ($("#paste-fallback").classList.contains("recommended") !== extractionError) $("#paste-fallback").classList.toggle("recommended", extractionError);
   renderSource();
-  setDisabled($("#stop"), !active);
-  setDisabled($("#pause"), !active || update.state === "loading");
+  setDisabled($("#stop"), !active || update.state === "stopping");
+  setDisabled($("#pause"), !active || ["loading", "stopping"].includes(update.state) || update.recovering);
   setText($("#pause"), update.paused ? "Resume" : "Pause");
-  const labels = { loading: source === "url" ? "Fetching and extracting article…" : "Preparing narration…", generating: "Generating first audio…", playing: "Playing", stopped: "Stopped", finished: "Finished", error: "Could not read article" };
-  const state = update.paused ? "Paused" : update.warming ? "Speech engine is waking up…" : update.state === "playing" && update.bufferedSeconds < 0.05 ? "Buffering…" : labels[update.state];
+  const state = playbackLabel(update);
   setText(statusText, update.error ? `${state}: ${update.error}` : state);
+  $("#recovery-note").hidden = !update.warning;
+  if (update.warning) setText($("#recovery-note"), update.warning);
+  $("#reconnect").hidden = !update.retryAvailable;
   const busy = Boolean(active && (update.warming || ["loading", "generating"].includes(update.state)) && !update.paused && !update.error);
   if (status.classList.contains("is-busy") !== busy) status.classList.toggle("is-busy", busy);
   const playing = Boolean(active && update.state === "playing" && update.bufferedSeconds >= 0.05 && !busy && !update.paused && !update.error);
@@ -117,15 +133,13 @@ function read(fromUrl) {
   if (active) return;
   const input = fromUrl ? $("#url").value.trim() : textArea.value.trim();
   if (!input) { showFeedback(fromUrl ? "Enter a webpage URL first." : "Enter some text first."); return; }
-  if (!fromUrl && input.length > 100_000) { showFeedback("Text exceeds the 100,000 character limit."); return; }
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) { showFeedback("This browser does not support Web Audio."); return; }
+  if (!$("#narration-audio").canPlayType("audio/mpeg")) { showFeedback("This browser does not support MP3 audio playback."); return; }
   const voice = $("#voice").value;
   const speed = Number($("#speed").value);
   try {
-    const session = new Narrator({
-      audioContext: new AudioContext(),
-      synthesize: (text, signal, onWaiting) => synthesizeSpeech({ text, voice, speed }, signal, onWaiting),
+    narrator?.dispose();
+    const session = new StreamingPlayer({
+      audio: $("#narration-audio"), bookmarkReady,
       onUpdate: (update) => { if (narrator === session) render(update); },
     });
     const trigger = document.activeElement;
@@ -156,7 +170,9 @@ function read(fromUrl) {
         $("#paste-fallback").setAttribute("aria-expanded", "false");
         revealWorkspace();
       }
-      return chunkText(text);
+      const hasArticle = !$("#article-panel").hidden;
+      return { text, voice, speed, title: hasArticle ? $("#article-title").textContent.slice(0, 200) : "Pasted text",
+        byline: hasArticle ? $("#byline").textContent.slice(0, 500) : "", ...(hasArticle ? { sourceUrl: $("#source").href } : {}) };
     });
   } catch (error) { showFeedback(error.message); }
 }
@@ -190,8 +206,42 @@ function updateSettingsSummary() {
 for (const id of ["#voice", "#speed"]) $(id).addEventListener("change", updateSettingsSummary);
 updateSettingsSummary();
 $("#pause").addEventListener("click", () => void narrator?.togglePause());
-$("#stop").addEventListener("click", () => {
-  void narrator?.shutdown();
+$("#stop").addEventListener("click", async () => {
+  await narrator?.shutdown();
   $(sessionHasText || source === "text" ? "#read-start" : "#read-url").focus({ preventScroll: true });
 });
-window.addEventListener("pagehide", () => void narrator?.shutdown());
+$("#reconnect").addEventListener("click", () => void narrator?.refresh());
+// Leaving the page must not cancel server-owned synthesis or native playback.
+window.addEventListener("pagehide", () => narrator?.savePosition(true));
+document.addEventListener("visibilitychange", () => { if (document.hidden) narrator?.savePosition(true); });
+window.addEventListener("pageshow", () => void narrator?.refresh());
+
+const recovery = new StreamingPlayer({
+  audio: $("#narration-audio"), bookmarkReady,
+  onUpdate: update => { if (narrator === recovery) render(update); },
+  onRestore: content => {
+    if (narrator !== recovery) return;
+    source = content.sourceUrl ? "url" : "text";
+    sessionHasText = hasReadText = true;
+    textArea.value = content.text;
+    $("#voice").value = content.voice;
+    $("#speed").value = String(content.speed);
+    updateSettingsSummary();
+    if (content.sourceUrl) {
+      $("#url").value = content.sourceUrl;
+      setText($("#article-title"), content.title);
+      setText($("#byline"), content.byline);
+      setText($("#source"), content.sourceUrl);
+      $("#source").href = content.sourceUrl;
+      setText($("#article-body"), content.text);
+      $("#article-panel").hidden = false;
+      setText($("#editor-summary"), "Edit article text");
+    } else $("#editor").open = true;
+    $("#diagnostics").hidden = false;
+    revealWorkspace();
+  },
+});
+narrator = recovery;
+void recovery.restore().then(restored => {
+  if (!restored && narrator === recovery && recovery.bookmark.warning) showFeedback(recovery.bookmark.warning);
+}).catch(error => { if (narrator === recovery) showFeedback(error.message); });

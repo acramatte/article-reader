@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { mockNarration, deferred } from "./narration-fixture.mjs";
 
 const article = { title: "The article behind the link", byline: "Extraction fixture", url: "https://example.com/article", text: "Only reveal actual extracted content. This fixture checks the layout transition, not speech quality." };
 
@@ -12,8 +13,9 @@ for (const [width, reducedMotion] of [[1280, "no-preference"], [390, "no-prefere
       await pending;
       await route.fulfill({ json: article });
     });
-    // Explicit startup fixture avoids relying on synthesis latency for motion measurements.
-    await page.route("**/api/tts", (route) => route.fulfill({ status: 503, json: { code: "INFERENCE_UNAVAILABLE" }, headers: { "Retry-After": "5" } }));
+    // SYNTHETIC/UI-only startup status; no claim about provider retries.
+    const mediaGate = deferred();
+    await mockNarration(page, { state: "generating", generated: 0, warming: true, mediaGate });
     await page.goto("/");
     await page.locator("#url").fill(article.url);
     await page.evaluate(() => {
@@ -90,6 +92,8 @@ for (const [width, reducedMotion] of [[1280, "no-preference"], [390, "no-prefere
     console.log("REVEAL MOTION", JSON.stringify({ width, reducedMotion, before: motion.before, finalTop, frames: motion.tops.length, focusPreserved: motion.focused }));
     await page.screenshot({ path: test.info().outputPath(`revealed-${width}-${reducedMotion}.png`), fullPage: true });
     await page.locator("#stop").click();
+    await expect(page.locator("#status")).toHaveText("Stopped");
+    mediaGate.resolve();
     await expect(page.locator("#read-start")).toBeFocused();
     await expect(page.locator("#read-start")).toHaveText("Read again");
   });
@@ -98,7 +102,7 @@ for (const [width, reducedMotion] of [[1280, "no-preference"], [390, "no-prefere
 test("extraction error keeps the landing intact and offers a keyboard-accessible manual fallback", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route("**/api/article", (route) => route.fulfill({ status: 422, json: { error: "No readable article found on this page." } }));
-  await page.route("**/api/tts", (route) => route.fulfill({ status: 502, json: { error: "Deliberate speech error fixture" } }));
+  await page.route("**/api/streaming", (route) => route.fulfill({ status: 502, json: { error: "Deliberate speech error fixture" } }));
   await page.goto("/");
   await page.locator("#url").fill(article.url);
   await page.locator("#read-url").click();

@@ -1,23 +1,10 @@
 import { test, expect } from "@playwright/test";
+import { mockNarration } from "./narration-fixture.mjs";
 
 for (const action of ["resume", "stop"]) {
   test(`interrupting the pause drop with ${action} cancels it`, async ({ page }) => {
-    // Synthetic silent WAV exercises transport and rendering, not speech synthesis.
-    const samples = 8000 * 4;
-    const audio = Buffer.alloc(44 + samples * 2);
-    audio.write("RIFF", 0);
-    audio.writeUInt32LE(audio.length - 8, 4);
-    audio.write("WAVEfmt ", 8);
-    audio.writeUInt32LE(16, 16);
-    audio.writeUInt16LE(1, 20);
-    audio.writeUInt16LE(1, 22);
-    audio.writeUInt32LE(8000, 24);
-    audio.writeUInt32LE(16000, 28);
-    audio.writeUInt16LE(2, 32);
-    audio.writeUInt16LE(16, 34);
-    audio.write("data", 36);
-    audio.writeUInt32LE(samples * 2, 40);
-    await page.route("**/api/tts", (route) => route.fulfill({ contentType: "audio/wav", body: audio }));
+    // SYNTHETIC/UI-only native media, not speech synthesis.
+    await mockNarration(page);
     await page.goto("/");
     await page.locator("#paste-fallback").click();
     await page.locator("#text").fill("A synthetic fixture for interrupting the equalizer drop.");
@@ -39,6 +26,7 @@ for (const action of ["resume", "stop"]) {
       await expect(page.locator(".status-equalizer")).toBeVisible();
       await page.locator("#stop").click();
     }
+    await expect(page.locator("#status")).toHaveText("Stopped");
     await expect(page.locator(".status-equalizer")).toBeHidden();
   });
 }

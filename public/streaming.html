@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Locked-screen streaming test</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #111419; color: #e6e8ed; }
+    body { max-width: 700px; margin: 0 auto; padding: 20px; line-height: 1.5; }
+    h1 { font-size: 1.55rem; } h2 { font-size: 1.15rem; }
+    label { display: block; margin-top: 16px; }
+    input, textarea, select, button { box-sizing: border-box; font: inherit; border: 1px solid #46505d; border-radius: 8px; padding: 10px; background: #1b212a; color: inherit; }
+    input[type=url], textarea, audio { width: 100%; } textarea { min-height: 190px; resize: vertical; }
+    button { min-height: 44px; cursor: pointer; } button:disabled { opacity: .5; cursor: default; }
+    #start { background: #244c39; } .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0; }
+    .row label { margin: 0; } .card { padding: 16px; border: 1px solid #46505d; border-radius: 12px; margin: 20px 0; }
+    .muted { color: #aeb6c1; } #status { min-height: 1.5em; } #report { font-size: .85rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+    a { color: #92d4b0; } input[type=checkbox] { width: 20px; height: 20px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <h1>Locked-screen streaming test</h1>
+  <p class="muted">Experimental: real Kokoro speech → one continuous MP3 stream → Android media playback. The normal reader now uses the same media delivery.</p>
+  <form id="form">
+    <label for="url">Article URL (optional; otherwise use the text below)</label>
+    <input id="url" type="url" placeholder="https://…" />
+    <label for="text">Text to narrate (server-configured limit; default 100,000 characters)</label>
+    <textarea id="text">This is a real speech test for listening with a locked phone. The browser plays one continuous audio stream while the server generates the next paragraphs. Start playback, mark the test, then lock your phone and listen.
+
+The first paragraph should begin before the rest of the article has been prepared. The reader does not ask the page to schedule each small piece of speech. A media player handles the audio, and the server is responsible for producing it. When the screen switches off, the speech should carry on without needing you to touch the phone.
+
+You are now hearing the next part of the test. If you locked your phone near the beginning, some of these paragraphs should have been generated while the screen was off. That distinction matters: continuing to play an initial buffer is not sufficient proof. We want newly generated speech to reach the player while the page is in the background.
+
+Use the controls on your lock screen or headphones to pause and resume. Pausing stops the sound, but the server can continue preparing the remaining narration. Resuming should continue the same recording, without requesting a new article or synthesizing the beginning again. You should not have to leave the screen on for this to work.
+
+After listening for at least a minute, unlock the phone and inspect the test report. It records how many chunks were generated after the mark and whether playback reached beyond the speech that already existed at that point. These measurements supplement your actual listening; they cannot establish whether you heard gaps, distortion, or silence.
+
+The final paragraph ends the recording naturally. Stop cancels the session, and restarting the server discards it.</textarea>
+    <div class="row">
+      <label>Voice <select id="voice"><option value="af_heart">Heart</option><option value="af_bella">Bella</option><option value="af_nicole">Nicole</option></select></label>
+      <label>Speed <select id="speed"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="0.75">0.75×</option></select></label>
+    </div>
+    <label><input id="pace" type="checkbox" /> Add a five-second gap between synthesis requests, to make generation after locking observable. Test only: this can cause buffering even at 1×.</label>
+    <div class="row"><button id="start" type="submit">Start streaming test</button><button id="stop" type="button" disabled>Stop</button></div>
+  </form>
+  <section class="card" aria-label="Playback">
+    <p id="status" role="status">Ready to test.</p>
+    <audio id="audio" controls preload="none"></audio>
+    <p><button id="resume" type="button" hidden disabled>Resume saved recording</button></p>
+    <div class="row"><button id="mark" type="button" disabled>Mark test, then lock phone</button><button id="refresh" type="button" disabled>Refresh report</button></div>
+    <p id="evidence" class="muted">Start at 1× speed. After marking, lock the screen and listen for at least one minute.</p>
+    <details><summary>Measurements and session report</summary><pre id="report">No session yet.</pre></details>
+  </section>
+  <p class="muted">Reload restores the last saved playback position without new synthesis. In-progress recordings must finish before position recovery. Pause may finish preparing the audio. Stop discards the recording and its bookmark. Disconnected generation stops after two minutes; generation has a twenty-minute deadline and completed recordings are retained for six hours by default. This test is private-network only.</p>
+  <p><a href="/index.html">Return to the normal reader</a></p>
+  <script type="module" src="/streaming.js"></script>
+</body>
+</html>
