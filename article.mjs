@@ -96,9 +96,45 @@ export async function fetchArticleHtml(value, { signal, resolve = lookup, reques
   throw new Error("The webpage redirected too many times.");
 }
 
-export function extractArticle(html, url) {
+// Remove machine-data leaf divs outside article content, not JSON/code examples.
+function removeMachineData(document) {
+  if (!document.querySelector('article')) return; // No reliable content boundary: retain data.
+  for (const node of document.querySelectorAll('div')) {
+    const main = node.closest('main');
+    if (node.children.length || node.closest('article,pre,code') || (main && !main.querySelector('article'))) continue;
+    const text = node.textContent.trim();
+    if (!/^[\[{]/.test(text)) continue;
+    try { const data = JSON.parse(text); if (data && typeof data === 'object') node.remove(); }
+    catch { continue; } // Non-JSON prose is deliberately retained.
+  }
+}
+
+function removeFormWidgets(document) {
+  for (const control of document.querySelectorAll('[role="listbox"],[role="tooltip"]')) {
+    const widget = control.closest('[data-nosnippet]');
+    if (widget && !widget.matches('article,main,section') && widget.textContent.length <= 1_000) widget.remove();
+  }
+  // Smallest short input+button container only; never an article/section.
+  for (const input of document.querySelectorAll('input,textarea,select')) {
+    for (let node = input.parentElement; node && node !== document.body; node = node.parentElement) {
+      if (node.textContent.length > 1_000 || node.matches('article,main,section')) break;
+      if (node.querySelector('button,[role="button"]')) { node.remove(); break; }
+    }
+  }
+}
+
+function cleanArticleDocument(document) {
+  removeMachineData(document);
+  removeFormWidgets(document);
+  // Semantic UI/hidden nodes only; no publisher or prose-keyword trimming.
+  document.querySelectorAll('nav,aside,form,button,input,textarea,select,label,iframe,[role="button"],[role="navigation"],[role="complementary"],[role="dialog"],[hidden],[aria-hidden="true"],[data-original-tag="iframe"]').forEach(node => node.remove());
+}
+
+export function extractArticle(html, url, { title } = {}) {
   const dom = new JSDOM(html, { url }); // Scripts and remote resources are deliberately disabled.
   try {
+    cleanArticleDocument(dom.window.document);
+    if (title && !dom.window.document.title) dom.window.document.title = title;
     const article = new Readability(dom.window.document, { maxElemsToParse: 50_000 }).parse();
     if (!article) throw new ArticleError("No readable article found. Try another URL or paste the text.", "RENDER_NEEDED");
     const content = new JSDOM(article.content);

@@ -25,7 +25,7 @@ export async function loadArticle(value, { signal, fetchPage = fetchArticleHtml,
   const deadline = AbortSignal.any([AbortSignal.timeout(45_000), ...(signal ? [signal] : [])]);
   try {
     const page = await fetchPage(value, { signal: deadline });
-    return extractArticle(page.html, page.url);
+    return extractArticle(page.html, page.url, { title: page.title });
   } catch (error) {
     deadline.throwIfAborted();
     // Only explicitly classified publisher blocks or missing readable text.
@@ -34,6 +34,6 @@ export async function loadArticle(value, { signal, fetchPage = fetchArticleHtml,
     if (!renderPage) throw error;
     const page = await renderPage(value, { signal: deadline });
     deadline.throwIfAborted();
-    return extractArticle(page.html, page.url);
+    return extractArticle(page.html, page.url, { title: page.title });
   }
 }

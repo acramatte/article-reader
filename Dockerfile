@@ -12,7 +12,7 @@ WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=3001
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
-COPY server.mjs article.mjs renderer-client.mjs ./
+COPY server.mjs article.mjs renderer-client.mjs firecrawl-client.mjs ./
 COPY --from=build /app/dist ./dist
 USER node
 EXPOSE 3001

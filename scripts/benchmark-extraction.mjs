@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fetchArticleHtml, extractArticle } from '../article.mjs';
 import { renderArticleHtml } from '../renderer-client.mjs';
+import { firecrawlArticleHtml } from '../firecrawl-client.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const cases = [
   { id: 'static', category: 'ordinary static article', url: 'https://www.paulgraham.com/greatwork.html', title: 'How to Do Great Work', anchors: ['work', 'curiosity'], minCharacters: 10000 },
@@ -31,18 +32,12 @@ for (const item of cases) for (const provider of providers) {
   try {
     let page;
     if (provider === 'firecrawl') {
-      const response = await fetch('https://api.firecrawl.dev/v2/scrape', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(process.env.FIRECRAWL_API_KEY ? { Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` } : {}) }, body: JSON.stringify({ url: item.url, formats: ['html', 'markdown'], onlyMainContent: true, timeout: 45000 }), signal: AbortSignal.timeout(55000) });
-      record.transportStatus = response.status;
-      // Bound response bytes, not just request time. No summaries accepted.
-      const reader = response.body.getReader(); let bytes = 0; const chunks = [];
-      try { while (true) { const part = await reader.read(); if (part.done) break; bytes += part.value.length; if (bytes > 6100000) throw new Error('Managed response exceeds byte budget'); chunks.push(part.value); } } finally { await reader.cancel().catch(() => {}); }
-      const data = JSON.parse(Buffer.concat(chunks).toString());
-      record.sourceStatus = data.data?.metadata?.statusCode ?? null;
-      record.providerTitle = data.data?.metadata?.title ?? null;
       record.authentication = process.env.FIRECRAWL_API_KEY ? 'environment key' : 'no key';
-      if (!response.ok || !data.success || !(record.sourceStatus >= 200 && record.sourceStatus < 300)) throw new Error(`Managed extraction failed: API ${response.status}, source ${record.sourceStatus}; ${data.error || ''}`);
-      if (typeof data.data.html !== 'string' || Buffer.byteLength(data.data.html) > 3000000) throw new Error('Missing or oversized actual HTML');
-      page = { html: data.data.html, url: item.url };
+      page = await firecrawlArticleHtml(item.url, { transport: async (...args) => {
+        const response = await fetch(...args); record.transportStatus = response.status; return response;
+      } });
+      record.sourceStatus = page.statusCode;
+      record.providerTitle = page.title;
     } else if (provider === 'direct') {
       page = await fetchArticleHtml(item.url, { signal: AbortSignal.timeout(17000) });
       record.sourceStatus = '2xx (exact status not exposed)'; // fetchArticleHtml accepts only 2xx.
@@ -54,7 +49,7 @@ for (const item of cases) for (const provider of providers) {
       // exact publisher status is not exposed by the API.
       record.sourceStatus = '2xx (exact status not exposed)';
     }
-    const article = extractArticle(page.html, page.url);
+    const article = extractArticle(page.html, page.url, { title: page.title });
     record.title = article.title; record.characters = article.text.length;
     record.finalUrl = article.url; record.textSha256 = createHash('sha256').update(article.text).digest('hex');
     record.opening = article.text.slice(0, 300); record.closing = article.text.slice(-300);

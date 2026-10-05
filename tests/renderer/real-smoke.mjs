@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createApp } from '../../server.mjs';
 const url = 'https://blog.angular.dev/an-update-on-angulars-typescript-7-powered-compiler-9619a35e2b0a';
-const server = createApp({ rendererUrl: process.env.ARTICLE_RENDERER_URL || 'http://127.0.0.1:3002/render' }).listen(0, '127.0.0.1');
+const server = createApp({ articleExtractor: '', rendererUrl: process.env.ARTICLE_RENDERER_URL || 'http://127.0.0.1:3002/render' }).listen(0, '127.0.0.1');
 await once(server, 'listening');
 try {
   const response = await fetch(`http://127.0.0.1:${server.address().port}/api/article`, {
