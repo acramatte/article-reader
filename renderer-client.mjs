@@ -1,5 +1,4 @@
 import { ArticleError, validateUrl, publicTarget, fetchArticleHtml, extractArticle } from './article.mjs';
-import { publisherFeed, fetchPublisherArticle } from './publisher-feed.mjs';
 
 export async function renderArticleHtml(value, { endpoint, signal, transport = fetch } = {}) {
   validateUrl(value);
@@ -22,7 +21,7 @@ export async function renderArticleHtml(value, { endpoint, signal, transport = f
   return result;
 }
 
-export async function loadArticle(value, { signal, fetchPage = fetchArticleHtml, renderPage, fetchFeed = fetchPublisherArticle } = {}) {
+export async function loadArticle(value, { signal, fetchPage = fetchArticleHtml, renderPage } = {}) {
   const deadline = AbortSignal.any([AbortSignal.timeout(45_000), ...(signal ? [signal] : [])]);
   try {
     const page = await fetchPage(value, { signal: deadline });
@@ -32,9 +31,6 @@ export async function loadArticle(value, { signal, fetchPage = fetchArticleHtml,
     // Only explicitly classified publisher blocks or missing readable text.
     // No fallback on URL/DNS/redirect validation, sizes, MIME, auth or transport.
     if (!(error instanceof ArticleError) || !['HTTP_BLOCK', 'RENDER_NEEDED'].includes(error.code)) throw error;
-    // Cheap official feed first, only on an explicit publisher HTTP block.
-    // Feed failure is surfaced honestly, never retried or replaced by a guess.
-    if (error.code === 'HTTP_BLOCK' && publisherFeed(value)) return fetchFeed(value, { signal: deadline });
     if (!renderPage) throw error;
     const page = await renderPage(value, { signal: deadline });
     deadline.throwIfAborted();

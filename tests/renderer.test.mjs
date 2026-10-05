@@ -30,6 +30,17 @@ test('fallback is opt-in, typed and used only once for blocks or render-needed t
   assert.equal(calls, 4);
 });
 
+test('Angular follows the generic renderer path with no publisher exception', async () => {
+  const url = 'https://blog.angular.dev/an-update-on-angulars-typescript-7-powered-compiler-9619a35e2b0a';
+  const blocked = async () => { throw new ArticleError('blocked', 'HTTP_BLOCK'); };
+  await assert.rejects(loadArticle(url, { fetchPage: blocked }), /blocked/);
+  let calls = 0;
+  await assert.rejects(loadArticle(url, { fetchPage: blocked, renderPage: async value => {
+    assert.equal(value, url); calls++; throw new Error('still blocked');
+  } }), /still blocked/);
+  assert.equal(calls, 1);
+});
+
 test('fallback propagates cancellation and does not start on an already aborted request', async () => {
   const controller = new AbortController();
   const pending = loadArticle(page.url, { signal: controller.signal, fetchPage: async () => { throw new ArticleError('blocked', 'HTTP_BLOCK'); },

@@ -1,6 +1,6 @@
 # Optional local renderer fallback
 
-The renderer is a **local, opt-in experiment**, not a production deployment change. Independently, the reader now has one automatic, narrowly allowlisted official publisher RSS fallback: `https://blog.angular.dev/feed`, only after HTTP 403/429 for an HTTPS Angular blog article URL without query/fragment. This inexpensive fallback runs before any browser attempt and also works with the renderer disabled. Feed failures are surfaced without retries or browser substitution. The normal reader still fetches pinned public IPs and parses with Readability without running scripts. `ARTICLE_RENDERER_URL` enables one browser attempt only after a typed HTTP 403/429 block or an extraction with no/insufficient readable text. URL/DNS/SSRF/redirect validation, MIME/size limits, HTTP 401 authentication responses, cancellation and transport errors **never** trigger it. A second failure is surfaced; there is no browser retry loop.
+The renderer is a **local, opt-in experiment**, not a production deployment change. There are no publisher-specific feeds or extraction rules. The normal reader still fetches pinned public IPs and parses with Readability without running scripts. `ARTICLE_RENDERER_URL` enables one browser attempt only after a typed HTTP 403/429 block or an extraction with no/insufficient readable text. URL/DNS/SSRF/redirect validation, MIME/size limits, HTTP 401 authentication responses, cancellation and transport errors **never** trigger it. A second failure is surfaced; there is no browser retry loop.
 
 ## Run
 
@@ -53,23 +53,8 @@ docker run --rm --network article-renderer-local_browser --user pwuser --cap-dro
 
 The fixture container deliberately has no production firewall bootstrap so its injected test-only proxy can use local fixture sockets. It still runs non-root sandboxed Chromium in the internal network with no capabilities. Production namespace egress is independently checked by `egress-check.mjs`. No runtime environment switch enables private upstream targets.
 
-### Angular publisher check and actual URL-to-audio
+### Public URL extraction checks
 
-The requested URL, `https://blog.angular.dev/an-update-on-angulars-typescript-7-powered-compiler-9619a35e2b0a`, remains blocked by Cloudflare in direct HTTP and browser checks. The reader now succeeds **without solving the challenge**, by reading that exact article from the legitimate publisher's public RSS `content:encoded` field.
+The exact requested Angular URL remains a measured blocked result locally, not renderer success. Run `node tests/renderer/real-smoke.mjs` against the local renderer to verify the article API reports its failure honestly (no TTS required). Representative public URL results, validation criteria, provider/version metadata and rerun commands are in [extraction-benchmark.md](extraction-benchmark.md). Synthetic JS/modal fixtures above establish mechanism and isolation only, not publisher coverage. Managed extraction is benchmark-only, not integrated into the app.
 
-The only feed is hardcoded `https://blog.angular.dev/feed`; there is no generic discovery, arbitrary feed input, search, or title/slug matching. The RSS item link must match the complete requested canonical URL exactly. Angular's observed fixed RSS attribution suffix `?source=rss----447683c3d9a3---4` is removed from feed links only; arbitrary query parameters are not removed. A missing or ambiguous item, malformed feed or failed request returns an error. Rolling feeds may eventually omit older articles.
-
-Every feed connection uses existing strict URL validation, all-answer public DNS validation, and pinned IP transport. Redirects are limited to five, revalidated each time and additionally cannot leave the publisher HTTPS origin. MIME must be RSS/XML, identity encoding only, bytes at most 3 MB, XML at most 50,000 elements, and the whole feed lookup (including DNS) has a 10-second deadline plus caller cancellation. DTD/entity declarations are rejected. XML/HTML parsing executes no scripts and loads no resources; item HTML goes through existing Readability/text limits. No cookies, credentials or login access are used. Success reports `source: "publisher-rss"` and preserves the requested URL.
-
-With a ready local Kokoro service:
-
-```sh
-npm run build
-TTS_URL=http://127.0.0.1:8000/tts node tests/renderer/real-smoke.mjs
-```
-
-This real-network check verifies `/api/article` **200**, enters the actual URL into the UI and clicks Read, observes a second real article API **200**, and waits for actual Kokoro WAV decoding and source starts. It never pastes text or mocks extraction/inference. It checks pause clock freeze and Stop closure, saving `angular-first-chunk.wav`, `publisher-feed-playing.png`, and `real-smoke.json` in ignored `.ui-review/renderer/`.
-
-Observed on local CPU Kokoro limited to four CPUs/6 GiB: **9,700 characters**, first usable audio **1.34 seconds**, decoded durations **2.475/31.625 seconds**, RMS **0.0450/0.0512**. There was **one underrun and a 7.94-second scheduling gap** after the short author-name first chunk, so continuous playback is **not established**. Pause and Stop passed. Playback chunking was intentionally not changed. This verifies non-silent generated audio and headless scheduling, not physical speaker output or human-perceived speech quality.
-
-Security regression coverage also sends a real upstream `HTTP/1.1 000` response to the proxy: it returns **502**, closes upstream, and serves the next request successfully instead of crashing the proxy/relay process. Response-callback exceptions are contained; the fixed local relay validates upstream status as well.
+Security regression coverage sends a real upstream `HTTP/1.1 000` response to the proxy: it returns **502**, closes upstream, and serves the next request successfully. Response-callback exceptions are contained; the fixed local relay validates upstream status as well.

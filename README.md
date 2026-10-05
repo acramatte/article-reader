@@ -116,7 +116,7 @@ Tests require local Kokoro and internet access to `https://www.paulgraham.com/gr
 
 ## Current limits
 
-- Blocked HTTPS Angular blog articles automatically use the official publisher RSS feed when its item link exactly matches the requested URL; missing/failed feed items fail honestly. This works without enabling the renderer (see [fallback bounds and real URL/audio verification](docs/local-renderer.md#angular-publisher-check-and-actual-url-to-audio)).
+- There are no publisher-specific extraction fallbacks. The requested Angular article remains blocked locally; see the [reproducible public-URL benchmark](docs/extraction-benchmark.md).
 - JS-heavy or paywalled pages may not extract; paste text as a fallback. An [opt-in local sandboxed renderer](docs/local-renderer.md) can help some JS-heavy pages, but does not bypass publisher blocks, logins or paywalls. Readability cannot remove every inline ad or consent banner.
 - Extraction accepts public HTTP/HTTPS URLs on standard ports, without URL credentials. Private, loopback, link-local and reserved addresses are blocked, including redirects; DNS results are checked and the selected public IP is pinned to the connection.
 - Default fetches have a 15-second deadline, five-redirect limit and 3 MB HTML limit. Scripts are not executed on the default path, UTF-8 HTML is assumed, and article text is limited to 100,000 characters. Optional renderer bounds are documented separately.

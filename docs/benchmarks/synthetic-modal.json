@@ -1,0 +1,17 @@
+{
+  "source": "tests/renderer/container-smoke.mjs",
+  "category": "deliberately synthetic JS + modal fixture, not public publisher coverage",
+  "provider": "local sandboxed Chromium",
+  "playwrightVersion": "1.63.0",
+  "rendererImage": "sha256:91bbe55d00e491255a4fe6b56639f9f0cc0f5a7f6839645bf65eb4c1afd2c791",
+  "status": "passed",
+  "title": "Rendered fixture article",
+  "characters": 315,
+  "validation": "Real JavaScript article inserted; MODAL NOISE absent; private requests denied; delayed insertion after 3 seconds extracted; fresh contexts discarded",
+  "latencyMs": null,
+  "latencyNote": "Extraction latency not logged by existing fixture runner; cancellation measured separately",
+  "cancellationMs": 106,
+  "contextsRemaining": 0,
+  "privateDnsChecks": 4,
+  "sandbox": true
+}
