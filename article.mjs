@@ -5,6 +5,10 @@ import ipaddr from "ipaddr.js";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 
+export class ArticleError extends Error {
+  constructor(message, code) { super(message); this.code = code; }
+}
+
 export function validateUrl(value) {
   let url;
   try { url = new URL(value); } catch { throw new Error("Enter a valid HTTP or HTTPS URL."); }
@@ -31,7 +35,7 @@ export async function publicTarget(url, resolve = lookup) {
 }
 
 // Pin the checked IP to this connection; redirects each get a fresh validation.
-export function requestPage(url, target, signal, maxBytes = 3_000_000) {
+export function requestPage(url, target, signal, maxBytes = 3_000_000, { accept = "text/html,application/xhtml+xml", mime = /^(text\/html|application\/xhtml\+xml)(;|$)/i } = {}) {
   return new Promise((resolve, reject) => {
     const transport = url.protocol === "https:" ? https : http;
     const request = transport.get(url, {
@@ -40,7 +44,7 @@ export function requestPage(url, target, signal, maxBytes = 3_000_000) {
       lookup: (_hostname, options, callback) => {
         callback(null, options.all ? [target] : target.address, target.family);
       },
-      headers: { "User-Agent": "ArticleReader/1.0", Accept: "text/html,application/xhtml+xml", "Accept-Encoding": "identity" },
+      headers: { "User-Agent": "ArticleReader/1.0", Accept: accept, "Accept-Encoding": "identity" },
     }, (response) => {
       const status = response.statusCode;
       if ([301, 302, 303, 307, 308].includes(status)) {
@@ -50,10 +54,10 @@ export function requestPage(url, target, signal, maxBytes = 3_000_000) {
       }
       if (status < 200 || status >= 300) {
         response.destroy();
-        reject(new Error(`The webpage returned HTTP ${status}.`));
+        reject(new ArticleError(`The webpage returned HTTP ${status}.`, [403, 429].includes(status) ? "HTTP_BLOCK" : "HTTP_ERROR"));
         return;
       }
-      if (!/^(text\/html|application\/xhtml\+xml)(;|$)/i.test(response.headers["content-type"] || "")) {
+      if (!mime.test(response.headers["content-type"] || "")) {
         response.destroy();
         reject(new Error("The URL did not return an HTML webpage."));
         return;
@@ -96,7 +100,7 @@ export function extractArticle(html, url) {
   const dom = new JSDOM(html, { url }); // Scripts and remote resources are deliberately disabled.
   try {
     const article = new Readability(dom.window.document, { maxElemsToParse: 50_000 }).parse();
-    if (!article) throw new Error("No readable article found. Try another URL or paste the text.");
+    if (!article) throw new ArticleError("No readable article found. Try another URL or paste the text.", "RENDER_NEEDED");
     const content = new JSDOM(article.content);
     try {
       const document = content.window.document;
@@ -106,7 +110,7 @@ export function extractArticle(html, url) {
         .filter((node) => !node.querySelector("p,li,pre,blockquote"))
         .map((node) => normalize(node.textContent)).filter(Boolean);
       const text = (blocks.length ? blocks.join("\n\n") : normalize(document.body.textContent));
-      if (text.length < 80) throw new Error("Not enough article text found. This page may require JavaScript or a login.");
+      if (text.length < 80) throw new ArticleError("Not enough article text found. This page may require JavaScript or a login.", "RENDER_NEEDED");
       if (text.length > 100_000) throw new Error("The article exceeds the 100,000 character limit.");
       return { title: article.title || new URL(url).hostname, byline: article.byline || "", url, text };
     } finally { content.window.close(); }

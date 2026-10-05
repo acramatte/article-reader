@@ -13,3 +13,5 @@
 !vite.config.js
 !server.mjs
 !article.mjs
+!renderer-client.mjs
+!publisher-feed.mjs

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createApp } from "../server.mjs";
 import { html } from "./fixture.mjs";
+import { ArticleError } from "../article.mjs";
 
 async function app(t, options = {}) {
   const server = createApp(options).listen(0, "127.0.0.1");
@@ -28,6 +29,16 @@ test("API extracts article and proxies WAV and metrics, sending token only upstr
   assert.equal(upstream.request.headers.Authorization, "Bearer test-only-token");
   assert.deepEqual(JSON.parse(upstream.request.body), { text: "Hello", voice: "af_heart", speed: 1 });
   assert.equal((await response.arrayBuffer()).byteLength, 4);
+});
+
+test("API wires typed renderer fallback, preserves text safety and never retries validation errors", async (t) => {
+  let calls = 0;
+  const renderPage = async (_value, { signal }) => { assert.ok(signal); calls++; return { html, url: "https://example.com/story" }; };
+  const post = await app(t, { fetchPage: async () => { throw new ArticleError("HTTP block", "HTTP_BLOCK"); }, renderPage });
+  const result = await post("/api/article", { url: "https://example.com/story" });
+  assert.equal(result.status, 200); assert.equal((await result.json()).title, "A garden for everyone"); assert.equal(calls, 1);
+  const denied = await app(t, { fetchPage: async () => { throw new Error("Private target denied"); }, renderPage });
+  assert.equal((await denied("/api/article", { url: "http://localhost/" })).status, 400); assert.equal(calls, 1);
 });
 
 test("API rejects invalid requests and cross-origin browser calls", async (t) => {

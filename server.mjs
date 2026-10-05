@@ -2,7 +2,8 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchArticleHtml, extractArticle } from "./article.mjs";
+import { fetchArticleHtml } from "./article.mjs";
+import { loadArticle, renderArticleHtml } from "./renderer-client.mjs";
 
 const voices = new Set(["af_heart", "af_bella", "af_nicole"]);
 async function readJson(request) {
@@ -21,6 +22,8 @@ export function createApp({
   ttsUrl = process.env.TTS_URL || "http://127.0.0.1:8000/tts",
   ttsToken = process.env.TTS_TOKEN,
   fetchPage = fetchArticleHtml,
+  rendererUrl = process.env.ARTICLE_RENDERER_URL,
+  renderPage = rendererUrl ? (value, options) => renderArticleHtml(value, { ...options, endpoint: rendererUrl }) : undefined,
   synthesize = fetch,
   staticDir = resolve("dist"),
 } = {}) {
@@ -47,8 +50,7 @@ export function createApp({
       if (request.method === "POST" && url.pathname === "/api/article") {
         const body = await readJson(request);
         if (typeof body?.url !== "string") return json(400, { error: "A webpage URL is required." });
-        const page = await fetchPage(body.url, { signal: controller.signal });
-        return json(200, extractArticle(page.html, page.url));
+        return json(200, await loadArticle(body.url, { signal: controller.signal, fetchPage, renderPage }));
       }
       if (request.method === "POST" && url.pathname === "/api/tts") {
         const body = await readJson(request);

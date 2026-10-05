@@ -89,6 +89,7 @@ Set these environment variables on the **Node backend**:
 | --- | --- | --- |
 | `TTS_URL` | `http://127.0.0.1:8000/tts` | Full speech-generation endpoint. |
 | `TTS_TOKEN` | Unset | Optional server-side Bearer token. Never use a `VITE_*` variable for it. |
+| `ARTICLE_RENDERER_URL` | Unset (disabled) | Optional server-side local renderer endpoint; see [local renderer](docs/local-renderer.md). Never point at an untrusted service. |
 | `PORT` | `3001` | Reader backend port. |
 | `HOST` | `127.0.0.1` | Reader backend bind address. |
 
@@ -115,9 +116,10 @@ Tests require local Kokoro and internet access to `https://www.paulgraham.com/gr
 
 ## Current limits
 
-- JS-heavy or paywalled pages may not extract; paste text as a fallback. Readability cannot remove every inline ad or consent banner.
+- Blocked HTTPS Angular blog articles automatically use the official publisher RSS feed when its item link exactly matches the requested URL; missing/failed feed items fail honestly. This works without enabling the renderer (see [fallback bounds and real URL/audio verification](docs/local-renderer.md#angular-publisher-check-and-actual-url-to-audio)).
+- JS-heavy or paywalled pages may not extract; paste text as a fallback. An [opt-in local sandboxed renderer](docs/local-renderer.md) can help some JS-heavy pages, but does not bypass publisher blocks, logins or paywalls. Readability cannot remove every inline ad or consent banner.
 - Extraction accepts public HTTP/HTTPS URLs on standard ports, without URL credentials. Private, loopback, link-local and reserved addresses are blocked, including redirects; DNS results are checked and the selected public IP is pinned to the connection.
-- Fetches have a 15-second deadline, five-redirect limit and 3 MB HTML limit. Scripts are not executed, UTF-8 HTML is assumed, and article text is limited to 100,000 characters.
+- Default fetches have a 15-second deadline, five-redirect limit and 3 MB HTML limit. Scripts are not executed on the default path, UTF-8 HTML is assumed, and article text is limited to 100,000 characters. Optional renderer bounds are documented separately.
 - No seeking, saved articles, offline reader mode, media-session integration or guaranteed mobile background playback yet.
 - The inference server needs to be dimensioned according to usage. Concurrent listening is limited by the speech service’s compute capacity and request queue. Altough the model is shared per inference worker, not loaded separately for each user.
 

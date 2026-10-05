@@ -1,0 +1,59 @@
+# Standalone opt-in LOCAL setup. Does not alter compose.yaml or deployment.
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: renderer/Dockerfile
+    image: article-reader-renderer:local
+    command: [node, renderer/proxy.mjs]
+    environment:
+      LOCAL_RELAY_TARGET: http://172.30.197.3:3002
+    # Fixed-target local relay; browser container stays network-internal only.
+    ports: ["127.0.0.1:${RENDERER_LOCAL_PORT:-3002}:3002"]
+    networks:
+      browser:
+        ipv4_address: 172.30.197.2
+      public: {}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 64
+    init: true
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://172.30.197.3:3002/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+  renderer:
+    image: article-reader-renderer:local
+    # Root only for network-namespace firewall setup; entrypoint drops all caps.
+    user: "0:0"
+    entrypoint: ["/app/renderer/entrypoint.sh"]
+    depends_on: [proxy]
+    environment:
+      RENDERER_PROXY: http://172.30.197.2:3128
+    networks:
+      browser:
+        ipv4_address: 172.30.197.3
+    # No published browser/control port; local relay is on the proxy container.
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./renderer/seccomp.json
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,size=256m"]
+    shm_size: 256m
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 256
+    init: true
+networks:
+  browser:
+    internal: true
+    ipam:
+      config: [{subnet: 172.30.197.0/29}]
+  public: {}
