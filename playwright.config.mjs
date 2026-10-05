@@ -6,6 +6,7 @@ const backendPort = Number(process.env.READER_BACKEND_PORT || 3017);
 
 export default defineConfig({
   testDir: "./tests/browser",
+  testIgnore: "streaming.spec.mjs", // The isolated streaming entry point has its own acceptance config.
   timeout: 120_000,
   expect: { timeout: 15_000 },
   workers: 1, // The local Kokoro service serializes inference.

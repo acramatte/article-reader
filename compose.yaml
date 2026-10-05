@@ -14,9 +14,11 @@ services:
       PORT: "3001"
       NODE_ENV: production
       TTS_URL: ${TTS_URL:?Set TTS_URL to the HF Protected HTTPS synthesis endpoint}
+      STREAM_SPOOL_DIR: /spool
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
+      - /spool:size=272m,mode=0700,uid=1000,gid=1000
     cap_drop:
       - ALL
     security_opt:

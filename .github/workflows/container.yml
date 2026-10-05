@@ -26,6 +26,8 @@ jobs:
         with:
           node-version: '24.18.0'
           cache: npm
+      - name: Install streaming test encoder
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Test application
         run: |
           npm ci --include=dev

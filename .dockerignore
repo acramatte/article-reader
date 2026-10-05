@@ -7,9 +7,13 @@
 !public/
 !public/**
 !main.js
-!narrator.mjs
 !chunks.mjs
 !tts-client.mjs
 !vite.config.js
 !server.mjs
 !article.mjs
+!streaming-server.mjs
+!streaming.mjs
+!streaming-api.mjs
+!tts-provider.mjs
+!stream-player.mjs

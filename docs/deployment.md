@@ -2,7 +2,7 @@
 
 ## Architecture and scope
 
-The reader container serves the production frontend and Node article-extraction/API backend. It contains no Python service or TTS weights. Browser requests stay same-origin; the VPS alone calls HF over outbound HTTPS. Configure an HF **Protected** endpoint (TLS + HF-token authentication), not **Private** (AWS/Azure PrivateLink). The endpoint must accept `{text, voice, speed}` JSON and return a complete, correctly sized `audio/wav` response. HF endpoint/container provisioning is separate work; the reader's bounded cold-start retry policy is described below. This deployment does not make a generic HF model endpoint compatible automatically.
+The reader container serves the production frontend and Node article-extraction/API backend. It includes FFmpeg for server-owned continuous MP3 encoding, but no Python service or TTS weights. Browser requests stay same-origin; the VPS alone calls HF over outbound HTTPS. Configure an HF **Protected** endpoint (TLS + HF-token authentication), not **Private** (AWS/Azure PrivateLink). The endpoint must accept `{text, voice, speed}` JSON and return a complete, correctly sized `audio/wav` response. HF endpoint/container provisioning is separate work; the reader's bounded cold-start retry policy is described below. This deployment does not make a generic HF model endpoint compatible automatically.
 
 No VPS access, image publishing, or Watchtower configuration changes are performed by adding these files.
 
@@ -18,7 +18,7 @@ The smoke test starts a temporary loopback-only container under production harde
 
 ## Prepare the VPS (after choosing a registry and confirming a free port)
 
-Use a separate Compose project, `article-reader`, without modifying Zaimutomo or starting a second Watchtower. Suggested reader address is `10.0.0.1:8084`; 8084 is NOT verified free. The host must already have `10.0.0.1` assigned by WireGuard before Compose starts.
+Use a separate Compose project, `article-reader`, without modifying unrelated services or starting a second Watchtower. Suggested reader address is `10.0.0.1:8084`; 8084 is NOT verified free. The host must already have `10.0.0.1` assigned by WireGuard before Compose starts.
 
 Publish the tested image to your chosen registry first. For automatic Watchtower updates, use a dedicated mutable release-channel tag such as `:stable`; keep previous immutable version tags/digests for rollback. Digest-pinning the reader in Compose deliberately disables tag-based automatic updates. The base image stays digest-pinned in either case. No registry/repository is presumed or created here.
 
@@ -26,12 +26,14 @@ Place `compose.yaml` in a dedicated deployment directory. Set these non-secret C
 
 - `READER_IMAGE`: full published image reference (required).
 - `TTS_URL`: full HF Protected HTTPS synthesis URL, including its route (required).
-- `READER_PORT`: optional, defaults to 8084; do not reuse Zaimutomo's 8083.
+- `READER_PORT`: optional, defaults to 8084; confirm it does not conflict with another service.
 - `READER_INFERENCE_ENV_FILE`: optional, defaults to `/etc/article-reader/inference.env`.
 
 Create the inference environment file directly on the VPS, outside the repo/build context, readable only by the deployment administrator (mode 0600). It must contain `TTS_TOKEN` with a dedicated least-privilege HF credential authorized for this endpoint. Never use a frontend `VITE_*` variable. Docker administrators can inspect container environment variables, so Docker access is a privileged trust boundary. Do not paste tokens into chat, commands/history, diagnostics or version control.
 
 Validate with `docker compose config --quiet` (not plain `config`, which can expose resolved credentials), then `docker compose pull` and `docker compose up -d`. Check `docker compose ps` and `/api/health` through WireGuard. Health checks test Node only, not paid inference; they must not keep a sleeping HF endpoint awake.
+
+The service uses a dedicated 272-MiB `/spool` tmpfs owned by UID 1000, in addition to a small `/tmp`. This covers the default four 64,000,000-byte recording limits with headroom; increase the spool and memory budget together if increasing those limits. `STREAM_MAX_AUDIO_BYTES` allows up to 1,000,000,000 bytes per recording, but does not resize that tmpfs (the real-inference smoke also fixes it at 272 MiB). Provision at least `STREAM_MAX_SESSIONS × STREAM_MAX_AUDIO_BYTES` plus filesystem headroom, and increase the container memory budget accordingly. Otherwise the filesystem can fill before the configured byte limit, failing generation with a storage-write error; the configured byte limit produces the separate “disk limit” error. The ownership lock lives inside `/spool`, so its parent does not need to be writable. Recordings are temporary: restart/redeployment loses the in-memory session map and recovery cannot survive it.
 
 The service runs non-root, read-only, without Linux capabilities, with no-new-privileges, bounded logs and initial limits of 512 MiB / one CPU / 128 PIDs. These are starting limits, not VPS load-test results. Startup does not depend on HF being online. Docker health status alone does not restart an unhealthy running process; the restart policy handles process exits.
 
@@ -44,9 +46,9 @@ Binding a destination IP is not an ingress-interface firewall rule. Verify Docke
 1. From a VPN client, reader health and frontend load successfully.
 2. From a non-VPN external client, the public VPS IP cannot reach the reader port.
 3. Inference accepts the authorized VPS credential and rejects missing/invalid credentials.
-4. Zaimutomo at `10.0.0.1:8083` still works unchanged.
+4. Existing services remain reachable and unchanged.
 
-`http://10.0.0.1:8084` is the initial VPN-only reader address. WireGuard encrypts the device-to-VPS link; the current AudioContext player does not generally require HTTPS. Test physical phone/browser playback rather than assuming compatibility. A remote HTTP address is not a browser secure context, so future service-worker/offline or AudioWorklet streaming features may require HTTPS. A private-resolving hostname with a trusted certificate can be added later without making the reader public. HTTPS/reverse-proxy setup is explicitly deferred; do not change the existing Kamal proxy for this deployment.
+`http://10.0.0.1:8084` is the initial VPN-only reader address. WireGuard encrypts the device-to-VPS link; the native HTML audio player does not generally require HTTPS. Test physical phone/browser playback rather than assuming compatibility. A remote HTTP address is not a browser secure context, so future service-worker/offline or AudioWorklet streaming features may require HTTPS. A private-resolving hostname with a trusted certificate can be added later without making the reader public. HTTPS/reverse-proxy setup is explicitly deferred; do not change the existing Kamal proxy for this deployment.
 
 ## Watchtower and rollback
 
@@ -58,4 +60,4 @@ Watchtower cannot rebuild this Dockerfile on the VPS. Do not mount the Docker so
 
 ## Remaining gates
 
-The existing app has no user auth, rate limiting or bounded concurrency admission; VPN access is the initial access boundary, not protection against a compromised VPN peer. Before routine use, bound synthesis concurrency/queueing at the app and inference service to prevent overspending. HF scale-to-zero can return 503 during startup. The backend forwards it as a structured `INFERENCE_UNAVAILABLE` 503 with `Retry-After`; only that response is retried by the browser. Each chunk has one 180-second total deadline (including response-body transfer), at most 20 attempts, and exponential 1/2/4/8-second backoff capped at 10 seconds; a longer numeric/date `Retry-After` takes precedence. The UI shows “Speech engine is waking up…” until success, error or Stop. Stop cancels retry waits and fetches; it cannot cancel HF provisioning or native synthesis already started. Authentication, busy, non-503 and ambiguous transport failures are not retried. Backend individual requests still have a 120-second timeout. There is no background warm-up polling; health remains local. A 503 can also mean overload rather than cold start, so the bounded policy must end with an actionable error. Test real URL-to-HF-to-browser narration, prolonged memory/CPU coexistence, network failure and physical phone playback before production acceptance. Do not expose this prototype publicly as-is.
+VPN access is the access boundary, not protection against a compromised VPN peer; the reader does not enforce per-user rate limits. Streaming has one generating narration, four retained sessions and explicit disk/time/text limits by default, with no waiting queue. This does not bound traffic to the compatibility `/api/tts` endpoint or constitute an inference-service abuse policy. Verify inference admission and cost controls before routine hosted use. HF scale-to-zero can return 503 during startup. The backend forwards it as a structured `INFERENCE_UNAVAILABLE` 503 with `Retry-After`; only that response is retried by the server-owned streaming provider (the legacy WAV route still forwards it). Each chunk has one 180-second total deadline (including response-body transfer), at most 20 attempts, and exponential 1/2/4/8-second backoff capped at 10 seconds; a longer numeric/date `Retry-After` takes precedence. The UI shows “Speech engine is waking up…” until success, error or Stop. Stop cancels server retry waits and fetches; it cannot cancel HF provisioning or native synthesis already started. Authentication, busy, non-503 and ambiguous transport failures are not retried. The legacy WAV endpoint retains its 120-second timeout. Streaming separately defaults to a twenty-minute generation deadline and six-hour recording retention; see the README's `STREAM_*` configuration table. There is no background warm-up polling; health remains local. A 503 can also mean overload rather than cold start, so the bounded policy must end with an actionable error. Test real URL-to-HF-to-browser narration, prolonged memory/CPU coexistence, network failure and physical phone playback before production acceptance. Do not expose this prototype publicly as-is.

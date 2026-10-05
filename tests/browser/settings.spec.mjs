@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { mockNarration, startPasted } from "./narration-fixture.mjs";
 
 for (const width of [1280, 390, 320]) {
   test(`idle voice disclosure is compact, keyboard accessible and synchronized: ${width}px`, async ({ page }) => {
@@ -7,7 +8,7 @@ for (const width of [1280, 390, 320]) {
     await page.route("**/api/article", (route) => route.fulfill({ json: {
       title: "Selected settings", byline: "", url: "https://example.com/article", text: "Read with my selected voice and speed.",
     } }));
-    await page.route("**/api/tts", (route) => {
+    await page.route("**/api/streaming", (route) => {
       speech = route.request().postDataJSON();
       return route.fulfill({ status: 502, json: { error: "Settings speech error fixture" } });
     });
@@ -87,22 +88,37 @@ test("URL placeholder follows viewport changes without replacing the focused inp
   expect(await input.evaluate((element) => element === window.originalUrlInput)).toBe(true);
 });
 
-for (const failure of ["unsupported", "constructor"]) {
+for (const failure of ["unsupported", "playback"]) {
   test(`pre-session ${failure} audio error reveals visible feedback without playback`, async ({ page }) => {
     await page.addInitScript((mode) => {
-      window.webkitAudioContext = undefined;
-      window.AudioContext = mode === "unsupported" ? undefined : class {
-        constructor() { throw new Error("Audio device unavailable fixture"); }
-      };
+      if (mode === "unsupported") HTMLMediaElement.prototype.canPlayType = () => "";
+      else HTMLMediaElement.prototype.play = () => Promise.reject(new Error("Audio device unavailable fixture"));
     }, failure);
-    await page.goto("/");
-    await expect(page.locator("#listening-card")).toBeHidden();
-    await page.locator("#url").fill("https://example.com/article");
-    await page.locator("#read-url").click();
+    const fixture = await mockNarration(page);
+    await startPasted(page);
     await expect(page.locator("#listening-card")).toBeVisible();
-    await expect(page.locator("#status")).toContainText(failure === "unsupported" ? "does not support Web Audio" : "Audio device unavailable fixture");
-    await expect(page.locator("#playback")).toBeHidden();
+    await expect(page.locator("#status")).toContainText(failure === "unsupported" ? "does not support MP3 audio playback" : "Audio device unavailable fixture");
     await expect(page.locator("#read-url")).toBeEnabled();
-    await expect(page.locator("#workspace")).toBeHidden();
+    expect(fixture.requests).toHaveLength(failure === "unsupported" ? 0 : 1);
   });
 }
+
+test("native autoplay denial exposes explicit Resume without regenerating speech (SYNTHETIC/UI-only)", async ({ page }) => {
+  await page.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play;
+    let denied = false;
+    HTMLMediaElement.prototype.play = function () {
+      if (!denied) { denied = true; return Promise.reject(new DOMException("Gesture needed", "NotAllowedError")); }
+      return play.call(this);
+    };
+  });
+  const fixture = await mockNarration(page);
+  await startPasted(page);
+  await expect(page.locator("#status")).toHaveText("Tap Resume to start audio.");
+  await expect(page.locator("#pause")).toHaveText("Resume");
+  await page.locator("#pause").click();
+  await expect(page.locator("#status")).toHaveText("Playing");
+  expect(fixture.requests).toHaveLength(1);
+  await page.locator("#stop").click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
+});
