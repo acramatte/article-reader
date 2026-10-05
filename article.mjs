@@ -5,6 +5,23 @@ import ipaddr from "ipaddr.js";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 
+export async function loadArticle(value, { signal, fetchPage = fetchArticleHtml, fallbackPage } = {}) {
+  const deadline = AbortSignal.any([AbortSignal.timeout(45_000), ...(signal ? [signal] : [])]);
+  try {
+    const page = await fetchPage(value, { signal: deadline });
+    return extractArticle(page.html, page.url, { title: page.title });
+  } catch (error) {
+    deadline.throwIfAborted();
+    // Only explicitly classified publisher blocks or missing readable text.
+    // No fallback on URL/DNS/redirect validation, sizes, MIME, auth or transport.
+    if (!(error instanceof ArticleError) || !['HTTP_BLOCK', 'RENDER_NEEDED'].includes(error.code)) throw error;
+    if (!fallbackPage) throw error;
+    const page = await fallbackPage(value, { signal: deadline });
+    deadline.throwIfAborted();
+    return extractArticle(page.html, page.url, { title: page.title });
+  }
+}
+
 export class ArticleError extends Error {
   constructor(message, code) { super(message); this.code = code; }
 }
@@ -35,7 +52,7 @@ export async function publicTarget(url, resolve = lookup) {
 }
 
 // Pin the checked IP to this connection; redirects each get a fresh validation.
-export function requestPage(url, target, signal, maxBytes = 3_000_000, { accept = "text/html,application/xhtml+xml", mime = /^(text\/html|application\/xhtml\+xml)(;|$)/i } = {}) {
+export function requestPage(url, target, signal, maxBytes = 3_000_000) {
   return new Promise((resolve, reject) => {
     const transport = url.protocol === "https:" ? https : http;
     const request = transport.get(url, {
@@ -44,7 +61,7 @@ export function requestPage(url, target, signal, maxBytes = 3_000_000, { accept 
       lookup: (_hostname, options, callback) => {
         callback(null, options.all ? [target] : target.address, target.family);
       },
-      headers: { "User-Agent": "ArticleReader/1.0", Accept: accept, "Accept-Encoding": "identity" },
+      headers: { "User-Agent": "ArticleReader/1.0", Accept: "text/html,application/xhtml+xml", "Accept-Encoding": "identity" },
     }, (response) => {
       const status = response.statusCode;
       if ([301, 302, 303, 307, 308].includes(status)) {
@@ -57,7 +74,7 @@ export function requestPage(url, target, signal, maxBytes = 3_000_000, { accept 
         reject(new ArticleError(`The webpage returned HTTP ${status}.`, [403, 429].includes(status) ? "HTTP_BLOCK" : "HTTP_ERROR"));
         return;
       }
-      if (!mime.test(response.headers["content-type"] || "")) {
+      if (!/^(text\/html|application\/xhtml\+xml)(;|$)/i.test(response.headers["content-type"] || "")) {
         response.destroy();
         reject(new Error("The URL did not return an HTML webpage."));
         return;

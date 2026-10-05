@@ -16,7 +16,7 @@ const notFound = 'https://developer.chrome.com/blog/chrome-131';
 const report = { measuredAt: new Date().toISOString(), authentication: process.env.FIRECRAWL_API_KEY ? 'environment key' : 'no key',
   note: 'One sample with ready local CPU Kokoro; hosted cache state unknown. Not cold-run, SLA or physical listening evidence.', url };
 let browser;
-const server = createApp({ articleExtractor: 'firecrawl', rendererUrl: '',
+const server = createApp({ articleExtractor: 'firecrawl',
   ttsUrl: process.env.TTS_URL || 'http://127.0.0.1:18000/tts', staticDir: resolve(root, 'dist') }).listen(0, '127.0.0.1');
 await once(server, 'listening');
 try {

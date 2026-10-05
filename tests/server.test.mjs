@@ -31,14 +31,33 @@ test("API extracts article and proxies WAV and metrics, sending token only upstr
   assert.equal((await response.arrayBuffer()).byteLength, 4);
 });
 
-test("API wires typed renderer fallback, preserves text safety and never retries validation errors", async (t) => {
+test("API wires typed Firecrawl fallback, preserves text safety and never retries validation errors", async (t) => {
   let calls = 0;
-  const renderPage = async (_value, { signal }) => { assert.ok(signal); calls++; return { html, url: "https://example.com/story" }; };
-  const post = await app(t, { fetchPage: async () => { throw new ArticleError("HTTP block", "HTTP_BLOCK"); }, renderPage });
+  const firecrawlPage = async (_value, { signal }) => { assert.ok(signal); calls++; return { html, url: "https://example.com/story" }; };
+  const post = await app(t, { fetchPage: async () => { throw new ArticleError("HTTP block", "HTTP_BLOCK"); }, articleExtractor: 'firecrawl', firecrawlPage });
   const result = await post("/api/article", { url: "https://example.com/story" });
   assert.equal(result.status, 200); assert.equal((await result.json()).title, "A garden for everyone"); assert.equal(calls, 1);
-  const denied = await app(t, { fetchPage: async () => { throw new Error("Private target denied"); }, renderPage });
+  const denied = await app(t, { fetchPage: async () => { throw new Error("Private target denied"); }, articleExtractor: 'firecrawl', firecrawlPage });
   assert.equal((await denied("/api/article", { url: "http://localhost/" })).status, 400); assert.equal(calls, 1);
+});
+
+test("Firecrawl requires explicit opt-in; server-side key alone does not enable it", async (t) => {
+  const blocked = async () => { throw new ArticleError("HTTP block", "HTTP_BLOCK"); };
+  let calls = 0;
+  const firecrawlPage = async (_value, { signal, apiKey }) => {
+    assert.ok(signal instanceof AbortSignal);
+    assert.equal(apiKey, "test-key");
+    calls++;
+    return { html, url: "https://example.com/story" };
+  };
+  const disabled = await app(t, { articleExtractor: '', fetchPage: blocked, firecrawlApiKey: 'test-key', firecrawlPage });
+  const failure = await disabled('/api/article', { url: 'https://example.com/story' });
+  assert.equal(failure.status, 400);
+  assert.equal((await failure.json()).text, undefined);
+  assert.equal(calls, 0);
+  const enabled = await app(t, { articleExtractor: 'firecrawl', fetchPage: blocked, firecrawlApiKey: 'test-key', firecrawlPage });
+  assert.equal((await enabled('/api/article', { url: 'https://example.com/story' })).status, 200);
+  assert.equal(calls, 1);
 });
 
 test("API rejects invalid requests and cross-origin browser calls", async (t) => {

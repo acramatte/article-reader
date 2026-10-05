@@ -2,8 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { firecrawlArticleHtml, FIRECRAWL_ENDPOINT } from '../firecrawl-client.mjs';
-import { ArticleError, extractArticle } from '../article.mjs';
-import { loadArticle } from '../renderer-client.mjs';
+import { ArticleError, extractArticle, loadArticle } from '../article.mjs';
 import { createApp } from '../server.mjs';
 import { html } from './fixture.mjs';
 
@@ -105,20 +104,18 @@ test('cancel before submit, during DNS, transport and body reads; late transport
   }
 });
 
-test('typed fallback integrates Firecrawl once, keeps defaults and local renderer, forbids ambiguity', async () => {
+test('typed fallback integrates Firecrawl once and keeps HTTP-only defaults', async () => {
   assert.throws(() => createApp({ articleExtractor: 'unknown' }), /supports only/);
-  assert.throws(() => createApp({ articleExtractor: 'firecrawl', rendererUrl: 'http://local/render' }), /not both/);
-  assert.throws(() => createApp({ articleExtractor: 'firecrawl', renderPage: () => {} }), /not both/);
   const direct = async () => ({ html, url }); let calls = 0;
-  const renderPage = async value => { calls++; return firecrawlArticleHtml(value, { resolve, transport: async () => response() }); };
-  await loadArticle(url, { fetchPage: direct, renderPage }); assert.equal(calls, 0);
+  const fallbackPage = async value => { calls++; return firecrawlArticleHtml(value, { resolve, transport: async () => response() }); };
+  await loadArticle(url, { fetchPage: direct, fallbackPage }); assert.equal(calls, 0);
   for (const code of ['HTTP_BLOCK', 'RENDER_NEEDED']) {
     const fetchPage = async () => { throw new ArticleError('blocked', code); };
-    assert.ok((await loadArticle(url, { fetchPage, renderPage })).text.length > 80);
+    assert.ok((await loadArticle(url, { fetchPage, fallbackPage })).text.length > 80);
   }
   assert.equal(calls, 2);
   for (const error of [new ArticleError('404', 'HTTP_ERROR'), new Error('DNS'), new Error('size'), new Error('transport'), new Error('auth')]) {
-    await assert.rejects(loadArticle(url, { fetchPage: async () => { throw error; }, renderPage }), e => e === error);
+    await assert.rejects(loadArticle(url, { fetchPage: async () => { throw error; }, fallbackPage }), e => e === error);
   }
   assert.equal(calls, 2);
   const server = createApp({ fetchPage: direct }).listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -157,8 +154,8 @@ test('deadline cancellation includes unresolved DNS and interrupted bodies have 
 });
 
 test('reader API exposes actionable Firecrawl error codes without converting provider failure to article success', async () => {
-  const server = createApp({ articleExtractor: '', rendererUrl: '', fetchPage: async () => { throw new ArticleError('blocked', 'HTTP_BLOCK'); },
-    renderPage: async () => { throw new ArticleError('Firecrawl rate limit reached. Try later.', 'FIRECRAWL_RATE_LIMIT'); } }).listen(0, '127.0.0.1');
+  const server = createApp({ articleExtractor: 'firecrawl', fetchPage: async () => { throw new ArticleError('blocked', 'HTTP_BLOCK'); },
+    firecrawlPage: async () => { throw new ArticleError('Firecrawl rate limit reached. Try later.', 'FIRECRAWL_RATE_LIMIT'); } }).listen(0, '127.0.0.1');
   await once(server, 'listening');
   try {
     const api = await fetch(`http://127.0.0.1:${server.address().port}/api/article`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });

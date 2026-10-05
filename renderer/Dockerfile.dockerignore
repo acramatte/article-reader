@@ -1,9 +1,0 @@
-**
-!package.json
-!package-lock.json
-!article.mjs
-!renderer/
-!renderer/Dockerfile
-!renderer/proxy.mjs
-!renderer/service.mjs
-!renderer/entrypoint.sh

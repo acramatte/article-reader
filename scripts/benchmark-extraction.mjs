@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fetchArticleHtml, extractArticle } from '../article.mjs';
-import { renderArticleHtml } from '../renderer-client.mjs';
 import { firecrawlArticleHtml } from '../firecrawl-client.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const cases = [
@@ -17,16 +16,15 @@ export const cases = [
   { id: 'not-found', category: 'negative HTTP 404 control', url: 'https://developer.chrome.com/blog/chrome-131', title: '', anchors: [], minCharacters: 1, negative: true },
 ];
 const args = process.argv.slice(2);
-const output = resolve(args.find(a => a.startsWith('--output='))?.slice(9) || resolve(root, 'docs/benchmarks/local-extraction.json'));
-const providers = args.includes('--firecrawl') ? ['firecrawl'] : ['direct', 'local-renderer'];
-const endpoint = process.env.ARTICLE_RENDERER_URL || 'http://127.0.0.1:3002/render';
+const output = resolve(args.find(a => a.startsWith('--output='))?.slice(9) || resolve(root, 'docs/benchmarks/direct-extraction.json'));
+const providers = args.includes('--firecrawl') ? ['firecrawl'] : ['direct'];
 const lock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'));
 const report = { measuredAt: new Date().toISOString(), revision: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim(), workingTree: 'uncommitted benchmark revision; see accompanying diff', node: process.version,
-  versions: Object.fromEntries(['@playwright/test', '@mozilla/readability', 'jsdom'].map(p => [p, lock.packages[`node_modules/${p}`].version])),
-  rendererImage: process.env.RENDERER_IMAGE_ID || 'not supplied', note: 'Sequential single samples, no retries. Latency includes transport and Readability. Success requires source HTTP 2xx, title/content anchors and minimum length; not a human completeness assessment.', records: [] };
+  versions: Object.fromEntries(['@mozilla/readability', 'jsdom'].map(p => [p, lock.packages[`node_modules/${p}`].version])),
+  note: 'Sequential single samples, no retries. Latency includes transport and Readability. Success requires source HTTP 2xx, title/content anchors and minimum length; not a human completeness assessment.', records: [] };
 await mkdir(dirname(output), { recursive: true });
 for (const item of cases) for (const provider of providers) {
-  const record = { id: item.id, category: item.category, source: item.url, provider, providerVersion: provider === 'firecrawl' ? 'API v2; hosted backend version undisclosed' : provider === 'local-renderer' ? report.versions['@playwright/test'] : process.version,
+  const record = { id: item.id, category: item.category, source: item.url, provider, providerVersion: provider === 'firecrawl' ? 'API v2; hosted backend version undisclosed' : process.version,
     status: 'error', transportStatus: null, sourceStatus: null, title: null, characters: 0, validation: { expectedTitle: item.title, anchors: item.anchors, minCharacters: item.minCharacters, passed: false } };
   const start = performance.now();
   try {
@@ -41,13 +39,6 @@ for (const item of cases) for (const provider of providers) {
     } else if (provider === 'direct') {
       page = await fetchArticleHtml(item.url, { signal: AbortSignal.timeout(17000) });
       record.sourceStatus = '2xx (exact status not exposed)'; // fetchArticleHtml accepts only 2xx.
-    } else {
-      page = await renderArticleHtml(item.url, { endpoint, transport: async (...args) => {
-        const response = await fetch(...args); record.transportStatus = response.status; return response;
-      } });
-      // Current renderer returns HTML only after a successful main response;
-      // exact publisher status is not exposed by the API.
-      record.sourceStatus = '2xx (exact status not exposed)';
     }
     const article = extractArticle(page.html, page.url, { title: page.title });
     record.title = article.title; record.characters = article.text.length;

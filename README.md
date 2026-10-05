@@ -90,8 +90,7 @@ Set these environment variables on the **Node backend**:
 | --- | --- | --- |
 | `TTS_URL` | `http://127.0.0.1:8000/tts` | Full speech-generation endpoint. |
 | `TTS_TOKEN` | Unset | Optional server-side Bearer token. Never use a `VITE_*` variable for it. |
-| `ARTICLE_RENDERER_URL` | Unset (disabled) | Optional server-side local renderer endpoint; see [local renderer](docs/local-renderer.md). Never point at an untrusted service. |
-| `ARTICLE_EXTRACTOR` | Unset | Set `firecrawl` for HTTP → managed fallback → Readability. Cannot be combined with `ARTICLE_RENDERER_URL`; see [Firecrawl](docs/firecrawl.md). |
+| `ARTICLE_EXTRACTOR` | Unset | Set `firecrawl` for HTTP → managed fallback → Readability. See [Firecrawl](docs/firecrawl.md). |
 | `FIRECRAWL_API_KEY` | Unset | Optional server-side key for Firecrawl; paid/key-backed use recommended for production. A key alone does not enable fallback. Never use `VITE_*`. |
 | `PORT` | `3001` | Reader backend port. |
 | `HOST` | `127.0.0.1` | Reader backend bind address. |
@@ -119,10 +118,10 @@ Tests require local Kokoro and internet access to `https://www.paulgraham.com/gr
 
 ## Current limits
 
-- There are no publisher-specific extraction fallbacks. Angular remains blocked on direct/local rendering, but the general [opt-in Firecrawl path](docs/firecrawl.md) has real Angular URL-to-audio evidence. See the [public-URL benchmark](docs/extraction-benchmark.md); managed access is not guaranteed.
-- JS-heavy or paywalled pages may not extract; paste text as a fallback. An [opt-in local sandboxed renderer](docs/local-renderer.md) can help some JS-heavy pages, but does not bypass publisher blocks, logins or paywalls. Readability cannot remove every inline ad or consent banner.
+- There are no publisher-specific extraction fallbacks. Angular remains blocked on direct HTTP, but the general [opt-in Firecrawl path](docs/firecrawl.md) has real Angular URL-to-audio evidence. See the [public-URL benchmark](docs/extraction-benchmark.md); managed access is not guaranteed.
+- JS-heavy or paywalled pages may not extract; paste text as a fallback. The [opt-in Firecrawl fallback](docs/firecrawl.md) can help some pages; access is not guaranteed and no login/paywall bypass is provided. Readability cannot remove every inline ad or consent banner.
 - Extraction accepts public HTTP/HTTPS URLs on standard ports, without URL credentials. Private, loopback, link-local and reserved addresses are blocked, including redirects; DNS results are checked and the selected public IP is pinned to the connection.
-- Default fetches have a 15-second deadline, five-redirect limit and 3 MB HTML limit. Scripts are not executed on the default path, UTF-8 HTML is assumed, and article text is limited to 100,000 characters. Optional renderer bounds are documented separately.
+- Default fetches have a 15-second deadline, five-redirect limit and 3 MB HTML limit. Scripts are not executed on the default path, UTF-8 HTML is assumed, and article text is limited to 100,000 characters. Firecrawl fallback bounds are [documented separately](docs/firecrawl.md).
 - No seeking, saved articles, offline reader mode, media-session integration or guaranteed mobile background playback yet.
 - The inference server needs to be dimensioned according to usage. Concurrent listening is limited by the speech service’s compute capacity and request queue. Altough the model is shared per inference worker, not loaded separately for each user.
 

@@ -1,8 +1,8 @@
 {
-  "measuredAt": "2026-10-05T16:16:48.464Z",
-  "image": "article-reader:firecrawl-review",
+  "measuredAt": "2026-10-05T17:35:25.597Z",
+  "image": "article-reader:firecrawl-cleanup",
   "authentication": "no key",
-  "imageId": "sha256:62b1ed4350d4998e51d17103396e818eea2aaba872013e8bd29cbc38402aea4c",
+  "imageId": "sha256:56c64a54b1ba11917553a036b8597c483d680611733caa71fe85f0a4d7835969",
   "article": {
     "status": 200,
     "title": "An update on Angular’s TypeScript 7-powered Compiler | by Angular | Sep, 2026",

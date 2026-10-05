@@ -2,8 +2,7 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchArticleHtml } from "./article.mjs";
-import { loadArticle, renderArticleHtml } from "./renderer-client.mjs";
+import { fetchArticleHtml, loadArticle } from "./article.mjs";
 import { firecrawlArticleHtml } from "./firecrawl-client.mjs";
 
 const voices = new Set(["af_heart", "af_bella", "af_nicole"]);
@@ -25,18 +24,16 @@ export function createApp({
   ttsUrl = process.env.TTS_URL || "http://127.0.0.1:8000/tts",
   ttsToken = process.env.TTS_TOKEN,
   fetchPage = fetchArticleHtml,
-  rendererUrl = process.env.ARTICLE_RENDERER_URL,
   articleExtractor = process.env.ARTICLE_EXTRACTOR,
   firecrawlApiKey = process.env.FIRECRAWL_API_KEY,
-  renderPage,
+  firecrawlPage = firecrawlArticleHtml,
   synthesize = fetch,
   staticDir = resolve("dist"),
 } = {}) {
-  if (articleExtractor && articleExtractor !== 'firecrawl') throw new Error('ARTICLE_EXTRACTOR supports only firecrawl; unset it for HTTP-only/local rendering.');
-  if (articleExtractor && (rendererUrl || renderPage)) throw new Error('Choose Firecrawl OR ARTICLE_RENDERER_URL/custom renderPage, not both.');
-  renderPage ||= articleExtractor === 'firecrawl'
-    ? (value, options) => firecrawlArticleHtml(value, { ...options, apiKey: firecrawlApiKey })
-    : rendererUrl ? (value, options) => renderArticleHtml(value, { ...options, endpoint: rendererUrl }) : undefined;
+  if (articleExtractor && articleExtractor !== 'firecrawl') throw new Error('ARTICLE_EXTRACTOR supports only firecrawl; unset it for HTTP-only extraction.');
+  const fallbackPage = articleExtractor === 'firecrawl'
+    ? (value, options) => firecrawlPage(value, { ...options, apiKey: firecrawlApiKey })
+    : undefined;
   const endpoint = new URL(ttsUrl);
   if (!["http:", "https:"].includes(endpoint.protocol)) throw new Error("TTS_URL must use HTTP or HTTPS.");
   return http.createServer(async (request, response) => {
@@ -60,7 +57,7 @@ export function createApp({
       if (request.method === "POST" && url.pathname === "/api/article") {
         const body = await readJson(request);
         if (typeof body?.url !== "string") return json(400, { error: "A webpage URL is required." });
-        return json(200, await loadArticle(body.url, { signal: controller.signal, fetchPage, renderPage }));
+        return json(200, await loadArticle(body.url, { signal: controller.signal, fetchPage, fallbackPage }));
       }
       if (request.method === "POST" && url.pathname === "/api/tts") {
         const body = await readJson(request);

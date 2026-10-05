@@ -13,5 +13,4 @@
 !vite.config.js
 !server.mjs
 !article.mjs
-!renderer-client.mjs
 !firecrawl-client.mjs
