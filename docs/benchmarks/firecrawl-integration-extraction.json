@@ -1,0 +1,231 @@
+{
+  "measuredAt": "2026-10-05T16:09:33.041Z",
+  "revision": "e17fffaad3aea3d8b473cc22ee9d779a9bfe94c2",
+  "workingTree": "uncommitted benchmark revision; see accompanying diff",
+  "node": "v24.18.0",
+  "versions": {
+    "@playwright/test": "1.63.0",
+    "@mozilla/readability": "0.6.0",
+    "jsdom": "30.1.1"
+  },
+  "rendererImage": "not supplied",
+  "note": "Sequential single samples, no retries. Latency includes transport and Readability. Success requires source HTTP 2xx, title/content anchors and minimum length; not a human completeness assessment.",
+  "records": [
+    {
+      "id": "static",
+      "category": "ordinary static article",
+      "source": "https://www.paulgraham.com/greatwork.html",
+      "provider": "firecrawl",
+      "providerVersion": "API v2; hosted backend version undisclosed",
+      "status": "validated-content",
+      "transportStatus": 200,
+      "sourceStatus": 200,
+      "title": "How to Do Great Work",
+      "characters": 59515,
+      "validation": {
+        "expectedTitle": "How to Do Great Work",
+        "anchors": [
+          "work",
+          "curiosity"
+        ],
+        "minCharacters": 10000,
+        "passed": true,
+        "titleMatched": true,
+        "anchorMatches": [
+          {
+            "anchor": "work",
+            "found": true
+          },
+          {
+            "anchor": "curiosity",
+            "found": true
+          }
+        ]
+      },
+      "authentication": "no key",
+      "providerTitle": "How to Do Great Work",
+      "finalUrl": "https://www.paulgraham.com/greatwork.html",
+      "textSha256": "280a4c0759a5124647b77f4998dd80164ad8541be2b85ad3e8650b55b67e7380",
+      "opening": "If you collected lists of techniques for doing great work in a lot of different fields, what would the intersection look like? I decided to find out by making it.\n\nPartly my goal was to create a guide that could be used by someone working in any field. But I was also curious about the shape of the i",
+      "closing": " not always be; different types of work have been collected together as much by accidents of history as by the intrinsic similarities between them.\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\nThe best lack all conviction, while the worst Are full of passionate intensity.\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[\n\n[",
+      "latencyMs": 791
+    },
+    {
+      "id": "react",
+      "category": "framework blog (hydration; not proof of client-only content)",
+      "source": "https://react.dev/blog/2024/12/05/react-19",
+      "provider": "firecrawl",
+      "providerVersion": "API v2; hosted backend version undisclosed",
+      "status": "validated-content",
+      "transportStatus": 200,
+      "sourceStatus": 200,
+      "title": "React v19 – React",
+      "characters": 27908,
+      "validation": {
+        "expectedTitle": "React v19",
+        "anchors": [
+          "Actions",
+          "useActionState"
+        ],
+        "minCharacters": 10000,
+        "passed": true,
+        "titleMatched": true,
+        "anchorMatches": [
+          {
+            "anchor": "Actions",
+            "found": true
+          },
+          {
+            "anchor": "useActionState",
+            "found": true
+          }
+        ]
+      },
+      "authentication": "no key",
+      "providerTitle": "React v19 – React",
+      "finalUrl": "https://react.dev/blog/2024/12/05/react-19",
+      "textSha256": "f45e6cd0cf9072baeabfe0b84b85ca07f80b20642d53fde4e7ca364f4605dc5d",
+      "opening": "December 05, 2024 by The React Team\n\nNote\n\nReact 19 is now stable!\n\nAdditions since this post was originally shared with the React 19 RC in April:\n\nPre-warming for suspended trees: see Improvements to Suspense.\n\nReact DOM static APIs: see New React DOM Static APIs.\n\nThe date for this post has been u",
+      "closing": "esign and implementation of Custom Element support in React.\n\nHow to upgrade\n\nSee the React 19 Upgrade Guide for step-by-step instructions and a full list of breaking and notable changes.\n\nNote: this post was originally published 04/25/2024 and has been updated to 12/05/2024 with the stable release.",
+      "latencyMs": 869
+    },
+    {
+      "id": "client-rendered",
+      "category": "public client-only demo, NOT a publisher article",
+      "source": "https://quotes.toscrape.com/js/",
+      "provider": "firecrawl",
+      "providerVersion": "API v2; hosted backend version undisclosed",
+      "status": "validated-content",
+      "transportStatus": 200,
+      "sourceStatus": 200,
+      "title": "Quotes to Scrape",
+      "characters": 1064,
+      "validation": {
+        "expectedTitle": "Quotes to Scrape",
+        "anchors": [
+          "Albert Einstein",
+          "Jane Austen"
+        ],
+        "minCharacters": 1000,
+        "passed": true,
+        "titleMatched": true,
+        "anchorMatches": [
+          {
+            "anchor": "Albert Einstein",
+            "found": true
+          },
+          {
+            "anchor": "Jane Austen",
+            "found": true
+          }
+        ]
+      },
+      "authentication": "no key",
+      "providerTitle": "Quotes to Scrape",
+      "finalUrl": "https://quotes.toscrape.com/js/",
+      "textSha256": "9cd1735d36355a0cbfbb523b5459925499b7545d7a86ed82685c1abd0274298c",
+      "opening": "“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”by\n\n“It is our choices, Harry, that show what we truly are, far more than our abilities.”by J.K. Rowling\n\n“There are only two ways to live your life. One is as though nothing is a mirac",
+      "closing": "oved for what you are not.”by André Gide\n\n“I have not failed. I've just found 10,000 ways that won't work.”by Thomas A. Edison\n\n“A woman is like a tea bag; you never know how strong it is until it's in hot water.”by Eleanor Roosevelt\n\n“A day without sunshine is like, you know, night.”by Steve Martin",
+      "latencyMs": 205
+    },
+    {
+      "id": "chrome",
+      "category": "developer article",
+      "source": "https://developer.chrome.com/blog/new-in-chrome-131",
+      "provider": "firecrawl",
+      "providerVersion": "API v2; hosted backend version undisclosed",
+      "status": "validated-content",
+      "transportStatus": 200,
+      "sourceStatus": 200,
+      "title": "New in Chrome 131 | Blog | Chrome for Developers",
+      "characters": 2832,
+      "validation": {
+        "expectedTitle": "Chrome 131",
+        "anchors": [
+          "CSS",
+          "131"
+        ],
+        "minCharacters": 1000,
+        "passed": true,
+        "titleMatched": true,
+        "anchorMatches": [
+          {
+            "anchor": "CSS",
+            "found": true
+          },
+          {
+            "anchor": "131",
+            "found": true
+          }
+        ]
+      },
+      "authentication": "no key",
+      "providerTitle": "New in Chrome 131  |  Blog  |  Chrome for Developers",
+      "finalUrl": "https://developer.chrome.com/blog/new-in-chrome-131",
+      "textSha256": "26f1b289beed9c8e3b0746dfeefd034d72c83c57e9294225fefe49e21e2b9253",
+      "opening": "Mariko Kosaka\n\nHere's what you need to know:\n\nMore CSS styling for the <details> element.\n\nEasier print layout with page margin boxes.\n\nAnd there's plenty more.\n\nI'm Mariko Kosaka. Let's dive in and see what's new for developers in Chrome 131.\n\nStyling Improvements to <details> and <summary>\n\nYou no",
+      "closing": "ange list\n\nChrome release calendar\n\nSubscribe\n\nTo stay up to date, subscribe to the Chrome Developers YouTube channel, and you'll get an email notification whenever we launch a new video.\n\nI'm Mariko Kosaka, and as soon as Chrome 132 is released, we'll be right here to tell you what's new in Chrome!",
+      "latencyMs": 249
+    },
+    {
+      "id": "angular",
+      "category": "publisher access block locally",
+      "source": "https://blog.angular.dev/an-update-on-angulars-typescript-7-powered-compiler-9619a35e2b0a",
+      "provider": "firecrawl",
+      "providerVersion": "API v2; hosted backend version undisclosed",
+      "status": "validated-content",
+      "transportStatus": 200,
+      "sourceStatus": 200,
+      "title": "An update on Angular’s TypeScript 7-powered Compiler | by Angular | Sep, 2026",
+      "characters": 9619,
+      "validation": {
+        "expectedTitle": "TypeScript 7-powered Compiler",
+        "anchors": [
+          "Alex Rickabaugh",
+          "oxc"
+        ],
+        "minCharacters": 8000,
+        "passed": true,
+        "titleMatched": true,
+        "anchorMatches": [
+          {
+            "anchor": "Alex Rickabaugh",
+            "found": true
+          },
+          {
+            "anchor": "oxc",
+            "found": true
+          }
+        ]
+      },
+      "authentication": "no key",
+      "providerTitle": "An update on Angular’s TypeScript 7-powered Compiler | by Angular | Sep, 2026 | Angular Blog",
+      "finalUrl": "https://blog.angular.dev/an-update-on-angulars-typescript-7-powered-compiler-9619a35e2b0a",
+      "textSha256": "7e45e866ea8ba3d7468f3680756942893059c3d655f47777d71e1f3aa65f9c05",
+      "opening": "6 min readSep 24, 2026\n\nAlex Rickabaugh & Mark Techson\n\n[Alex] I joined the Angular team in 2015, around the original Angular 2.0 release. One of my first tasks was to convert source code from JavaScript into a relatively new (at the time) language from Microsoft, known as TypeScript. TypeScript wou",
+      "closing": "2) or cross-file optimizations that are required to keep non-standalone application bundles small. We need to support both of these operations.\n\nLonger term, we are interested in adapting oxc-angular-compiler’s port of our template parsing and compilation engine to move more of ngp’s work into Rust.",
+      "latencyMs": 273
+    },
+    {
+      "id": "not-found",
+      "category": "negative HTTP 404 control",
+      "source": "https://developer.chrome.com/blog/chrome-131",
+      "provider": "firecrawl",
+      "providerVersion": "API v2; hosted backend version undisclosed",
+      "status": "expected-not-found",
+      "transportStatus": 200,
+      "sourceStatus": 404,
+      "title": null,
+      "characters": 0,
+      "validation": {
+        "expectedTitle": "",
+        "anchors": [],
+        "minCharacters": 1,
+        "passed": false
+      },
+      "authentication": "no key",
+      "error": "Firecrawl source returned HTTP 404. No article was accepted.",
+      "latencyMs": 193
+    }
+  ]
+}

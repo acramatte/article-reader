@@ -2,9 +2,12 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchArticleHtml, extractArticle } from "./article.mjs";
+import { fetchArticleHtml, loadArticle } from "./article.mjs";
+import { firecrawlArticleHtml } from "./firecrawl-client.mjs";
 
 const voices = new Set(["af_heart", "af_bella", "af_nicole"]);
+const firecrawlCodes = new Set(['FIRECRAWL_RESPONSE', 'FIRECRAWL_TRANSPORT', 'FIRECRAWL_AUTH',
+  'FIRECRAWL_CREDITS', 'FIRECRAWL_RATE_LIMIT', 'FIRECRAWL_HTTP', 'FIRECRAWL_SIZE', 'FIRECRAWL_SOURCE']);
 async function readJson(request) {
   let size = 0;
   const pieces = [];
@@ -21,9 +24,16 @@ export function createApp({
   ttsUrl = process.env.TTS_URL || "http://127.0.0.1:8000/tts",
   ttsToken = process.env.TTS_TOKEN,
   fetchPage = fetchArticleHtml,
+  articleExtractor = process.env.ARTICLE_EXTRACTOR,
+  firecrawlApiKey = process.env.FIRECRAWL_API_KEY,
+  firecrawlPage = firecrawlArticleHtml,
   synthesize = fetch,
   staticDir = resolve("dist"),
 } = {}) {
+  if (articleExtractor && articleExtractor !== 'firecrawl') throw new Error('ARTICLE_EXTRACTOR supports only firecrawl; unset it for HTTP-only extraction.');
+  const fallbackPage = articleExtractor === 'firecrawl'
+    ? (value, options) => firecrawlPage(value, { ...options, apiKey: firecrawlApiKey })
+    : undefined;
   const endpoint = new URL(ttsUrl);
   if (!["http:", "https:"].includes(endpoint.protocol)) throw new Error("TTS_URL must use HTTP or HTTPS.");
   return http.createServer(async (request, response) => {
@@ -47,8 +57,7 @@ export function createApp({
       if (request.method === "POST" && url.pathname === "/api/article") {
         const body = await readJson(request);
         if (typeof body?.url !== "string") return json(400, { error: "A webpage URL is required." });
-        const page = await fetchPage(body.url, { signal: controller.signal });
-        return json(200, extractArticle(page.html, page.url));
+        return json(200, await loadArticle(body.url, { signal: controller.signal, fetchPage, fallbackPage }));
       }
       if (request.method === "POST" && url.pathname === "/api/tts") {
         const body = await readJson(request);
@@ -102,7 +111,8 @@ export function createApp({
       if (controller.signal.aborted) return;
       if (error.code === "ENOENT") return json(404, { error: "Not found. Run npm run build for the production UI." });
       const message = error.name === "TimeoutError" ? "The request timed out." : error.message;
-      json(request.url.startsWith("/api/tts") ? 502 : 400, { error: message });
+      json(request.url.startsWith("/api/tts") ? 502 : 400, { error: message,
+        ...(firecrawlCodes.has(error.code) ? { code: error.code } : {}) });
     }
   });
 }

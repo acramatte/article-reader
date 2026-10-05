@@ -1,0 +1,27 @@
+{
+  "measuredAt": "2026-10-05T17:35:25.597Z",
+  "image": "article-reader:firecrawl-cleanup",
+  "authentication": "no key",
+  "imageId": "sha256:56c64a54b1ba11917553a036b8597c483d680611733caa71fe85f0a4d7835969",
+  "article": {
+    "status": 200,
+    "title": "An update on Angular’s TypeScript 7-powered Compiler | by Angular | Sep, 2026",
+    "characters": 9619,
+    "closing": "o keep non-standalone application bundles small. We need to support both of these operations.\n\nLonger term, we are interested in adapting oxc-angular-compiler’s port of our template parsing and compilation engine to move more of ngp’s work into Rust."
+  },
+  "runtime": {
+    "user": "node",
+    "readOnly": true,
+    "capDrop": [
+      "ALL"
+    ],
+    "memory": 536870912,
+    "cpus": 1000000000
+  },
+  "favicon": {
+    "status": 200,
+    "contentType": "image/svg+xml"
+  },
+  "oomKilled": false,
+  "passed": true
+}

@@ -1,0 +1,81 @@
+{
+  "measuredAt": "2026-10-05T17:32:26.941Z",
+  "authentication": "no key",
+  "note": "One sample with ready local CPU Kokoro; hosted cache state unknown. Not cold-run, SLA or physical listening evidence.",
+  "url": "https://blog.angular.dev/an-update-on-angulars-typescript-7-powered-compiler-9619a35e2b0a",
+  "directError": {
+    "code": "HTTP_BLOCK",
+    "message": "The webpage returned HTTP 403."
+  },
+  "source404": {
+    "code": "FIRECRAWL_SOURCE",
+    "message": "Firecrawl source returned HTTP 404. No article was accepted."
+  },
+  "api404": {
+    "status": 400,
+    "body": {
+      "error": "The webpage returned HTTP 404."
+    }
+  },
+  "observedWallMs": 13080,
+  "playback": {
+    "title": "An update on Angular’s TypeScript 7-powered Compiler | by Angular | Sep, 2026",
+    "characters": 9619,
+    "opening": "6 min readSep 24, 2026\n\nAlex Rickabaugh & Mark Techson\n\n[Alex] I joined the Angular team in 2015, around the original Angular 2.0 release. One of my first tasks was to convert source code from JavaScr",
+    "closing": "2) or cross-file optimizations that are required to keep non-standalone application bundles small. We need to support both of these operations.\n\nLonger term, we are interested in adapting oxc-angular-compiler’s port of our template parsing and compilation engine to move more of ngp’s work into Rust.",
+    "firstAudio": "1.87 s",
+    "underruns": 1,
+    "buffer": "31.7 s",
+    "starts": [
+      {
+        "at": 1.8526666666666667,
+        "duration": 3.525
+      },
+      {
+        "at": 5.377666666666666,
+        "duration": 2.475
+      },
+      {
+        "at": 13.063333333333334,
+        "duration": 31.625
+      }
+    ],
+    "decoded": [
+      {
+        "duration": 3.525,
+        "rms": 0.05035362098568343
+      },
+      {
+        "duration": 2.475,
+        "rms": 0.04493130658540753
+      },
+      {
+        "duration": 31.625,
+        "rms": 0.051220343190665235
+      }
+    ],
+    "state": "running",
+    "gapsSeconds": [
+      0,
+      5.210666666666668
+    ]
+  },
+  "pause": {
+    "before": 13.045333333333334,
+    "after": 13.045333333333334
+  },
+  "resumed": true,
+  "stop": {
+    "state": "Stopped",
+    "context": "closed"
+  },
+  "requests": [
+    "/api/article",
+    "/api/tts",
+    "/api/tts",
+    "/api/tts",
+    "/api/tts"
+  ],
+  "pageErrors": [],
+  "passed": true
+}
