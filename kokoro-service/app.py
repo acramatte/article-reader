@@ -42,19 +42,26 @@ load_started = time.perf_counter()
 torch.set_num_threads(int(os.getenv("KOKORO_THREADS", "2")))
 torch.set_num_interop_threads(1)
 model_dir = os.getenv("KOKORO_MODEL_DIR")
-if model_dir:
-    assets = Path(model_dir)
+assets = Path(model_dir) if model_dir else None
+if assets is not None:
     model = KModel(
         repo_id="hexgrad/Kokoro-82M",
         config=str(assets / "config.json"),
         model=str(assets / "kokoro-v1_0.pth"),
     ).to(device).eval()
-    pipeline = KPipeline(lang_code="a", repo_id="hexgrad/Kokoro-82M", model=model)
-    for voice in ("af_heart", "af_bella", "af_nicole"):
-        pipeline.voices[voice] = pipeline.load_single_voice(str(assets / "voices" / f"{voice}.pt"))
 else:
     # Preserve the existing local-development path; the image always sets model_dir.
-    pipeline = KPipeline(lang_code="a", repo_id="hexgrad/Kokoro-82M", device=device)
+    model = KModel(repo_id="hexgrad/Kokoro-82M").to(device).eval()
+
+# Language-specific pronunciation, with one shared model rather than two weight copies.
+pipelines = {
+    language: KPipeline(lang_code=language, repo_id="hexgrad/Kokoro-82M", model=model)
+    for language in ("a", "f")
+}
+for voice in ("af_heart", "af_nicole", "am_michael", "ff_siwis"):
+    pipeline = pipelines[voice[0]]
+    voice_path = str(assets / "voices" / f"{voice}.pt") if assets is not None else voice
+    pipeline.voices[voice] = pipeline.load_single_voice(voice_path)
 
 print(
     f"Kokoro loaded in "
@@ -68,7 +75,7 @@ admission = threading.BoundedSemaphore(2)
 
 class TTSRequest(BaseModel):
     text: str = Field(min_length=1, max_length=1_000, pattern=r"\S")
-    voice: Literal["af_heart", "af_bella", "af_nicole"] = "af_heart"
+    voice: Literal["af_heart", "af_nicole", "am_michael", "ff_siwis"] = "af_heart"
     speed: float = Field(default=1.0, ge=0.5, le=2.0, allow_inf_nan=False)
 
 
@@ -117,7 +124,7 @@ def tts(request: TTSRequest):
         started = time.perf_counter()
         chunks = []
         try:
-            for result in pipeline(request.text, voice=request.voice, speed=request.speed):
+            for result in pipelines[request.voice[0]](request.text, voice=request.voice, speed=request.speed):
                 if result.audio is not None:
                     chunks.append(result.audio.detach().cpu().numpy())
         except Exception as error:

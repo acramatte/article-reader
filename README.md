@@ -45,7 +45,7 @@ npm start
 
 Open **http://127.0.0.1:3001**, paste a link and click **Read**. Narration starts automatically and the extracted article appears below. If extraction fails, choose **Paste text instead**.
 
-The Listen card provides **Read again**, **Pause/Resume** and **Stop**. After stopping, use **Edit article text** to make changes; **Read again** generates fresh narration from that text without fetching the URL again. Voice/speed settings and playback diagnostics are collapsible. Reload recovery offers the same recording paused near its last saved position; tap Resume to continue without regenerating speech. English voices currently available: Heart, Bella and Nicole. Voice and synthesis speed are fixed for each listening session.
+The Listen card provides **Read again**, **Pause/Resume** and **Stop**. After stopping, use **Edit article text** to make changes; **Read again** generates fresh narration from that text without fetching the URL again. Voice/speed settings and playback diagnostics are collapsible. Reload recovery offers the same recording paused near its last saved position; tap Resume to continue without regenerating speech. Available voices: Heart and Nicole (American female), Michael (American male), and Siwis (French female). Choose a voice matching the text’s language; narration does not translate the article. Kokoro has no native French male voice. Voice and synthesis speed are fixed for each listening session.
 
 ### Hosting
 

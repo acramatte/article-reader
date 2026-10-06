@@ -64,11 +64,12 @@ if __name__ == "__main__":
     assert importlib.metadata.version("torch").endswith("+cpu")
     assert not any(d.metadata["Name"].lower().startswith("nvidia-") for d in importlib.metadata.distributions())
     quick = os.environ.get("KOKORO_SMOKE_MODE") == "quick"
-    voices = ("af_heart",) if quick else ("af_heart", "af_bella", "af_nicole")
+    voices = ("af_heart",) if quick else ("af_heart", "af_nicole", "am_michael", "ff_siwis")
     text = "Hello from Kokoro." if quick else TEXT
     measured = []
     for voice in voices:
-        measured.append({"voice": voice, **validate_wav(request("/tts", {"text": text, "voice": voice, "speed": 1}))})
+        voice_text = "Bonjour, cet article est lu en français. Ceci est un véritable test de synthèse vocale." if voice == "ff_siwis" else text
+        measured.append({"voice": voice, **validate_wav(request("/tts", {"text": voice_text, "voice": voice, "speed": 1}))})
     if not quick:
         # Root prediction route also supports HF clients that POST to the base URL.
         validate_wav(request("/", {"text": "Hello from the root prediction route.", "voice": "af_heart", "speed": 2}))
@@ -76,7 +77,7 @@ if __name__ == "__main__":
         validate_wav(request("/tts", {"text": (TEXT + " ") * 5, "voice": "af_heart", "speed": 0.5}))
         validate_wav(request("/tts", {"text": ((TEXT + " ") * 20)[:1000], "voice": "af_heart", "speed": 2}))
     for body in (
-        {"text": " "}, {"text": "x" * 1001}, {"text": TEXT, "voice": "unknown"},
+        {"text": " "}, {"text": "x" * 1001}, {"text": TEXT, "voice": "unknown"}, {"text": TEXT, "voice": "af_bella"},
         {"text": TEXT, "voice": "/tmp/voice.pt"}, {"text": TEXT, "speed": 0.49},
         {"text": TEXT, "speed": 2.01}, {"text": TEXT, "speed": "NaN"},
     ):

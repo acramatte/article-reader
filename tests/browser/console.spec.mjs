@@ -92,9 +92,9 @@ test("URL-first landing, fallback and compact settings are keyboard reachable at
     await page.keyboard.press("Enter");
     await page.keyboard.press("Tab");
     await expect(page.locator("#voice")).toBeFocused();
-    await page.locator("#voice").selectOption("af_bella");
+    await page.locator("#voice").selectOption("am_michael");
     await page.locator("#speed").selectOption("1.2");
-    await expect(page.locator("#settings-summary")).toHaveText("Bella · 1.2×");
+    await expect(page.locator("#settings-summary")).toHaveText("Michael · 1.2×");
     await page.locator("#text").fill("Pasted text is a fallback, not an extracted article.");
     await expect(page.locator("#read-start")).toHaveText("Read text");
     await expect(page.locator("#article-panel")).toBeHidden();

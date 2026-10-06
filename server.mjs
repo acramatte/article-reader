@@ -6,7 +6,7 @@ import { fetchArticleHtml, extractArticle } from "./article.mjs";
 import { speechProvider } from "./tts-provider.mjs";
 import { createStreamingApi } from "./streaming-api.mjs";
 
-const voices = new Set(["af_heart", "af_bella", "af_nicole"]);
+const voices = new Set(["af_heart", "af_nicole", "am_michael", "ff_siwis"]);
 export async function readJson(request, { maxBytes = 150_000 } = {}) {
   let size = 0;
   const pieces = [];

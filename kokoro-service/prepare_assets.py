@@ -11,7 +11,7 @@ from huggingface_hub import snapshot_download
 REPO = "hexgrad/Kokoro-82M"
 REVISION = "f3ff3571791e39611d31c381e3a41a3af07b4987"
 WEIGHT_SHA256 = "496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4"
-FILES = ["config.json", "kokoro-v1_0.pth", "voices/af_heart.pt", "voices/af_bella.pt", "voices/af_nicole.pt", "README.md", "VOICES.md"]
+FILES = ["config.json", "kokoro-v1_0.pth", "voices/af_heart.pt", "voices/af_nicole.pt", "voices/am_michael.pt", "voices/ff_siwis.pt", "README.md", "VOICES.md"]
 
 if __name__ == "__main__":
     destination = Path(sys.argv[1])

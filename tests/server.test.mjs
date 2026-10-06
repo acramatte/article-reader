@@ -35,7 +35,7 @@ async function streamingReader(t, options = {}) {
 
 test("normal reader exposes streaming content/audio/status/mark/stop and non-secret limits", async t => {
   const { base, server, post } = await streamingReader(t);
-  const body = { text: "An article paragraph.", voice: "af_bella", speed: 1.25, title: "Article", byline: "Author", sourceUrl: "https://example.com/story" };
+  const body = { text: "An article paragraph.", voice: "am_michael", speed: 1.25, title: "Article", byline: "Author", sourceUrl: "https://example.com/story" };
   const created = await post("/api/streaming", body);
   assert.equal(created.status, 201);
   const { id, audioUrl } = await created.json();
@@ -162,6 +162,32 @@ test("API extracts article and proxies WAV and metrics, sending token only upstr
   assert.equal(upstream.request.headers.Authorization, "Bearer test-only-token");
   assert.deepEqual(JSON.parse(upstream.request.body), { text: "Hello", voice: "af_heart", speed: 1 });
   assert.equal((await response.arrayBuffer()).byteLength, 4);
+});
+
+test("both speech APIs accept the current voices, preserve selection and reject Bella", async t => {
+  const seen = [];
+  const { base, server, post } = await streamingReader(t, { synthesizeChunk: undefined,
+    synthesize: async (_url, request) => {
+      seen.push(JSON.parse(request.body));
+      return new Response(syntheticWav(), { headers: { "Content-Type": "audio/wav" } });
+    } });
+  for (const voice of ["af_heart", "af_nicole", "am_michael", "ff_siwis"]) {
+    const body = { text: voice === "ff_siwis" ? "Bonjour, lecture en français." : "Hello, reading in English.", voice, speed: 1 };
+    assert.equal((await post("/api/tts", body)).status, 200);
+    assert.deepEqual(seen.at(-1), body);
+    const response = await post("/api/streaming", body);
+    assert.equal(response.status, 201);
+    const { id } = await response.json();
+    await server.narrations.sessions.get(id).done;
+    assert.deepEqual(seen.at(-1), body);
+    assert.equal((await (await fetch(`${base}/api/streaming/${id}/content`)).json()).voice, voice);
+    await post(`/api/streaming/${id}/stop`, {});
+  }
+  const count = seen.length;
+  for (const path of ["/api/tts", "/api/streaming"]) {
+    assert.equal((await post(path, { text: "Hello", voice: "af_bella", speed: 1 })).status, 400);
+  }
+  assert.equal(seen.length, count);
 });
 
 test("API rejects invalid requests and cross-origin browser calls", async (t) => {
