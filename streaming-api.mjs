@@ -24,7 +24,7 @@ export function streamingLimits(options = {}, env = process.env) {
 }
 
 function validate(body, maxTextChars) {
-  const voices = new Set(["af_heart", "af_bella", "af_nicole"]);
+  const voices = new Set(["af_heart", "af_nicole", "am_michael", "ff_siwis"]);
   if (typeof body?.text !== "string" || !body.text.trim() || body.text.length > maxTextChars ||
       !voices.has(body.voice) || typeof body.speed !== "number" || !Number.isFinite(body.speed) || body.speed < 0.5 || body.speed > 2 ||
       (body.paceSeconds !== undefined && (!Number.isInteger(body.paceSeconds) || body.paceSeconds < 0 || body.paceSeconds > 8))) {

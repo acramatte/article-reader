@@ -11,7 +11,8 @@ root = Path(__file__).resolve().parents[1]
 container = subprocess.check_output([
     "docker", "run", "--detach", "--init", "--network", "none", "--read-only",
     "--cap-drop=ALL", "--security-opt=no-new-privileges:true", "--memory=4g", "--memory-swap=4g", "--cpus=2",
-    "--pids-limit=128", "--tmpfs", "/tmp:size=64m,mode=1777", args.image,
+    # French phonemizer dlopens a private espeak library copy from its temp directory.
+    "--pids-limit=128", "--tmpfs", "/tmp:size=64m,mode=1777,exec", args.image,
 ], text=True).strip()
 try:
     probe = (root / "kokoro-service" / "smoke_test.py").read_text()
