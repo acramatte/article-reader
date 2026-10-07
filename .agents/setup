@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Orb setup: Node toolchain pinned to CI, npm dependencies, FFmpeg and the
+# Playwright Chromium build. Idempotent and fast on a warm snapshot.
+# The Kokoro speech service (Docker/Python + model) is intentionally not set
+# up here: it needs several GB of memory and a large model download.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+step() {
+  local name="$1"; shift
+  local start=$SECONDS
+  echo "==> $name"
+  "$@"
+  echo "    $name took $((SECONDS - start))s"
+}
+
+# Keep in sync with .github/workflows/*.yml and the Dockerfile base image.
+node_version="24.21.0"
+node_dir="$HOME/.local/share/node/v$node_version"
+
+install_node() {
+  if [[ -x "$node_dir/bin/node" ]] && [[ "$("$node_dir/bin/node" --version)" == "v$node_version" ]]; then
+    echo "    node v$node_version already installed"
+    return
+  fi
+  local arch
+  case "$(uname -m)" in
+    x86_64) arch=x64 ;;
+    aarch64) arch=arm64 ;;
+    *) echo "unsupported arch $(uname -m)" >&2; return 1 ;;
+  esac
+  local tmp
+  tmp="$(mktemp -d)"
+  curl -fsSL "https://nodejs.org/dist/v$node_version/node-v$node_version-linux-$arch.tar.xz" -o "$tmp/node.tar.xz"
+  mkdir -p "$node_dir"
+  tar -xJf "$tmp/node.tar.xz" -C "$node_dir" --strip-components=1
+  rm -rf "$tmp"
+}
+
+persist_node_path() {
+  local marker="# article-reader: pinned Node $node_version"
+  if ! grep -Fqx "$marker" "$HOME/.bash_profile" 2>/dev/null; then
+    cat >> "$HOME/.bash_profile" <<EOF
+
+$marker
+case ":\$PATH:" in
+  *":$node_dir/bin:"*) ;;
+  *) export PATH="$node_dir/bin:\$PATH" ;;
+esac
+EOF
+  fi
+}
+
+install_ffmpeg() {
+  # Capture first: `grep -q` closing the pipe early would trip pipefail.
+  local encoders=""
+  command -v ffmpeg >/dev/null && encoders="$(ffmpeg -hide_banner -encoders 2>/dev/null)"
+  if [[ "$encoders" == *libmp3lame* ]]; then
+    echo "    ffmpeg with libmp3lame present"
+    return
+  fi
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg
+}
+
+step "node v$node_version" install_node
+persist_node_path
+export PATH="$node_dir/bin:$PATH"
+step "ffmpeg" install_ffmpeg
+step "npm ci" npm ci --include=dev --no-audit --no-fund
+step "playwright chromium" npx --no-install playwright install chromium
+
+echo "==> setup complete (node $(node --version), npm $(npm --version))"

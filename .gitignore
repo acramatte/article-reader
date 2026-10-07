@@ -8,3 +8,4 @@ __pycache__/
 tts-playwright/
 playwright-report/
 .ui-review/
+.amp/portals/*
