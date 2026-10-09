@@ -5,7 +5,7 @@ const $ = selector => document.querySelector(selector);
 const audio = $("#audio");
 let id = null;
 let snapshot = null;
-let poll = null;
+let events = null;
 let starting = false;
 let settingsLoaded = false;
 let startedAt = 0;
@@ -35,7 +35,7 @@ function savePosition(force = false) {
 function forgetRecovery(messageText) {
   revision++;
   bookmark.clear();
-  clearInterval(poll);
+  closeStatus();
   id = null;
   snapshot = null;
   audio.removeAttribute("src");
@@ -109,7 +109,42 @@ function render() {
   }
 }
 
-async function refresh() {
+function closeStatus() {
+  events?.close();
+  events = null;
+}
+
+function applyStatus(result) {
+  revision++;
+  snapshot = result;
+  if (["ready", "error", "stopped"].includes(snapshot.state)) closeStatus();
+  if (snapshot.state === "error") { bookmark.clear(); restoring = false; recovery = null; message = `Generation failed: ${snapshot.error}`; }
+  else if (snapshot.state === "stopped") {
+    if (recovery) return forgetRecovery("Recording was stopped. Start a new narration explicitly.");
+    message = "Stopped.";
+  }
+  else if (restoring && snapshot.state === "ready") attachRecoveredAudio();
+  else if (restoring) message = "Recording is still generating. Waiting for completion before restoring its saved position…";
+  else if (snapshot.warming) message = "Speech engine is waking up…";
+  else if (!recovery && !firstPlaybackSeconds && audio.paused) message = "Preparing audio. If playback does not start, tap Play in the player.";
+  render();
+}
+
+function connectStatus() {
+  if (events || !id || stopping || ["ready", "error", "stopped"].includes(snapshot?.state)) return;
+  const source = events = new EventSource(`/api/streaming/${id}/events`);
+  source.addEventListener("status", event => {
+    if (events === source && !stopping) applyStatus(JSON.parse(event.data));
+  });
+  source.onerror = () => {
+    if (events !== source || stopping) return;
+    message = "Status connection interrupted. Reconnecting; the bookmark is retained.";
+    render();
+    if (source.readyState === EventSource.CLOSED) { closeStatus(); void refresh({ reconnect: false }); }
+  };
+}
+
+async function refresh({ reconnect = true } = {}) {
   if (!id) return;
   const current = id;
   const version = revision;
@@ -119,17 +154,12 @@ async function refresh() {
     if (id !== current || version !== revision || stopping) return;
     if (response.status === 404) return forgetRecovery("Recording expired or the server restarted. Start a new narration explicitly.");
     if (!response.ok) throw new Error(result.error);
-    snapshot = result;
-    if (snapshot.state === "error") { bookmark.clear(); restoring = false; recovery = null; message = `Generation failed: ${snapshot.error}`; }
-    else if (snapshot.state === "stopped") {
-      if (recovery) return forgetRecovery("Recording was stopped. Start a new narration explicitly.");
-      message = "Stopped.";
+    applyStatus(result);
+    if (reconnect) connectStatus();
+    else if (snapshot?.state === "generating") {
+      message = "Status connection closed. Refresh report to reconnect; audio playback can continue.";
+      render();
     }
-    else if (restoring && snapshot.state === "ready") attachRecoveredAudio();
-    else if (restoring) message = "Recording is still generating. Waiting for completion before restoring its saved position…";
-    else if (snapshot.warming) message = "Speech engine is waking up…";
-    else if (!recovery && !firstPlaybackSeconds && audio.paused) message = "Preparing audio. If playback does not start, tap Play in the player.";
-    render();
   } catch (error) {
     if (id === current && version === revision && !stopping) { message = recovery ? `Could not reconnect: ${error.message}. Refresh report to retry; the bookmark is retained.` : error.message; render(); }
   }
@@ -154,7 +184,7 @@ $("#form").addEventListener("submit", async event => {
   event.preventDefault();
   if (!settingsLoaded || starting || (id && !["stopped", "error"].includes(snapshot?.state))) return;
   revision++;
-  clearInterval(poll);
+  closeStatus();
   bookmark.clear();
   recovery = null;
   restoring = false;
@@ -200,8 +230,7 @@ $("#form").addEventListener("submit", async event => {
     mediaSession(title);
     message = "Generating first audio…";
     render();
-    poll = setInterval(refresh, 1000); // Status only; generation and playback do not depend on this timer.
-    await refresh();
+    connectStatus();
     await audio.play().catch(playError);
   } catch (error) {
     if (!signal.aborted) { message = error.message; starting = false; render(); }
@@ -221,7 +250,7 @@ $("#stop").addEventListener("click", async () => {
   audio.pause();
   audio.removeAttribute("src");
   audio.load();
-  clearInterval(poll);
+  closeStatus();
   render();
   try {
     const session = id ? { id } : await pendingCreation;
@@ -259,7 +288,7 @@ for (const event of ["playing", "pause", "waiting", "ended", "error"]) {
       message = "Playing continuous MP3 audio.";
     } else if (event === "pause" && !audio.ended) message = "Paused. Preparation may continue.";
     else if (event === "waiting") message = "Buffering…";
-    else if (event === "ended") { message = "Playback finished. Refresh the report to check generation status."; clearInterval(poll); }
+    else if (event === "ended") { message = "Playback finished. Refresh the report to check generation status."; closeStatus(); }
     else if (event === "error") { message = `Media playback failed (code ${audio.error?.code}).`; failures.push(message); }
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = audio.paused ? "paused" : "playing";
     savePosition(true);
@@ -287,7 +316,6 @@ void loadTtsSettings($("#voice")).then(tts => {
     narrationTitle = recovery.title;
     restoring = true;
     message = "Checking saved recording…";
-    poll = setInterval(refresh, 1000);
     void refresh();
   } else message = bookmark.warning || "Ready to test.";
   render();

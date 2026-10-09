@@ -29,12 +29,20 @@ class MediaFixture extends EventTarget {
   removeAttribute(name) { delete this[name]; }
 }
 
+class StatusFixture extends EventTarget {
+  constructor(url) { super(); this.url = url; this.readyState = 1; }
+  send(snapshot) { this.dispatchEvent(new MessageEvent("status", { data: JSON.stringify(snapshot) })); }
+  disconnect(state = 0) { this.readyState = state; this.onerror(); }
+  close() { this.readyState = 2; }
+}
+
 function fixture(t, handler) {
   const values = new Map();
   const bookmark = new PlaybackBookmark({ storage: () => ({ getItem: key => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) }) });
   const audio = new MediaFixture();
-  const calls = [], updates = [], restored = [];
-  const player = new StreamingPlayer({ audio, bookmarkReady: Promise.resolve(bookmark), pollMs: 100_000,
+  const calls = [], updates = [], restored = [], events = [];
+  const player = new StreamingPlayer({ audio, bookmarkReady: Promise.resolve(bookmark),
+    eventSource: url => { const source = new StatusFixture(url); events.push(source); return source; },
     onUpdate: update => updates.push(update), onRestore: article => restored.push(article),
     fetchImpl: async (path, options) => {
       calls.push({ path, options });
@@ -43,7 +51,7 @@ function fixture(t, handler) {
     },
   });
   t.after(() => player.dispose());
-  return { player, bookmark, audio, calls, updates, restored };
+  return { player, bookmark, audio, calls, updates, restored, events };
 }
 
 const ready = { state: "ready", generated: 2, total: 2, warming: false };
@@ -298,9 +306,68 @@ test("completion awaits an already pending status response instead of reporting 
   const delayed = deferred();
   const { player, updates } = fixture(t, path => path.endsWith("/status") ? delayed.promise : { id });
   await player.start(async () => content);
+  const refreshing = player.refresh();
   const finishing = player.finish();
   delayed.resolve(ready);
-  await finishing;
+  await Promise.all([refreshing, finishing]);
   assert.equal(updates.at(-1).state, "finished");
   assert.equal(updates.at(-1).error, undefined);
+});
+
+test("SSE updates preparation while paused and reconnects without affecting audio or polling", async t => {
+  const { player, events, calls, audio, updates, bookmark } = fixture(t, standard);
+  await player.start(async () => content);
+  assert.equal(events[0].url, `/api/streaming/${id}/events`);
+  events[0].send({ state: "generating", generated: 0, total: 3 });
+  await player.togglePause();
+  events[0].send({ state: "generating", generated: 1, total: 3 });
+  assert.equal(updates.at(-1).completed, 1);
+  events[0].disconnect();
+  assert.equal(audio.src, `/api/streaming/${id}/audio`);
+  assert.equal(bookmark.load().id, id);
+  assert.match(updates.at(-1).warning, /Reconnecting/);
+  events[0].send({ state: "generating", generated: 2, total: 3 });
+  assert.equal(updates.at(-1).completed, 2);
+  assert.equal(updates.at(-1).warning, null);
+  assert.equal(updates.at(-1).paused, true);
+  events[0].send(ready);
+  assert.equal(events[0].readyState, 2);
+  assert.equal(player.state, "playing", "generation ready is not playback finished");
+  assert.equal(calls.filter(call => call.path.endsWith("/status") || call.path.endsWith("/stop")).length, 0);
+});
+
+test("SSE readiness wins over a delayed recovery GET and shares a pending content read", async t => {
+  const delayedStatus = deferred(), delayedContent = deferred();
+  const { player, events, bookmark, restored, audio, calls } = fixture(t, path =>
+    path.endsWith("/status") ? delayedStatus.promise : delayedContent.promise);
+  bookmark.save({ id, title: content.title, positionSeconds: 6 }, true);
+  const restoring = player.restore();
+  await tick();
+  events[0].send({ ...ready, state: "generating", generated: 1 });
+  events[0].send(ready);
+  delayedStatus.resolve({ ...ready, state: "generating", generated: 0 });
+  delayedContent.resolve(content);
+  await restoring;
+  assert.equal(audio.currentTime, 6);
+  assert.equal(audio.playCalls, 0);
+  assert.deepEqual(restored, [content]);
+  assert.equal(calls.filter(call => call.path.endsWith("/content")).length, 1);
+});
+
+test("a rejected SSE connection diagnoses once, offers Retry, and ignores events after Stop", async t => {
+  const { player, events, calls, updates, bookmark } = fixture(t, path =>
+    path.endsWith("/status") ? { state: "generating", generated: 1, total: 3 } : standard(path));
+  await player.start(async () => content);
+  events[0].disconnect(2);
+  await tick();
+  assert.equal(events.length, 1, "no automatic HTTP rejection loop");
+  assert.equal(calls.filter(call => call.path.endsWith("/status")).length, 1);
+  assert.equal(updates.at(-1).retryAvailable, true);
+  await player.refresh();
+  assert.equal(events.length, 2);
+  await player.shutdown();
+  events[1].send(ready);
+  assert.equal(updates.at(-1).state, "stopped");
+  assert.equal(bookmark.load(), null);
+  assert.equal(events[1].readyState, 2);
 });

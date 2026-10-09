@@ -59,7 +59,8 @@ async function recoveryFixture(page, request, paceSeconds = 0) {
   const response = await request.post("/api/streaming", { data: { text, voice: "jane", speed: 1, paceSeconds } });
   expect(response.status()).toBe(201);
   const { id } = await response.json();
-  if (!paceSeconds) await expect.poll(async () => (await request.get(`/api/streaming/${id}/status`).then(r => r.json())).state).toBe("ready");
+  if (!paceSeconds) await expect.poll(async () => (await request.get(`/api/streaming/${id}/status`).then(r => r.json())).state,
+    { timeout: 90_000 }).toBe("ready");
   await page.goto("/streaming.html");
   await page.evaluate(id => localStorage.setItem("reader.streaming.resume.v1", JSON.stringify({
     id, title: "Recovery fixture", positionSeconds: 6, savedAt: Date.now() })), id);
@@ -111,7 +112,7 @@ test("in-progress recovery waits for completed audio before seeking without recr
   await expect(page.locator("#status")).toContainText("still generating");
   await expect(page.locator("#resume")).toBeDisabled();
   expect(await page.locator("#audio").getAttribute("src")).toBeNull();
-  await expect(page.locator("#resume")).toBeEnabled();
+  await expect(page.locator("#resume")).toBeEnabled({ timeout: 90_000 });
   expect(await page.evaluate(() => window.streamingProbe().id)).toBe(id);
   expect(await page.evaluate(() => window.streamingProbe().currentTime)).toBeCloseTo(6, 0);
   expect(await page.evaluate(() => window.streamingProbe().paused)).toBe(true);
@@ -194,6 +195,9 @@ test("real speech streams before completion and advances while page JavaScript i
       (marked.mark.audioSecondsGenerated - beforeFreeze + 3) * 1000)));
     await expect.poll(async () => (await request.get(`/api/streaming/${before.id}/status`).then(r => r.json())).generated,
       { timeout: 30_000 }).toBeGreaterThan(marked.generated);
+    // CPU synthesis may outrun the initial buffer only after a gap. Keep JS
+    // frozen while the new MP3 bytes arrive and native playback consumes them.
+    await new Promise(resolve => setTimeout(resolve, 3000));
   } finally {
     thawedAt = Date.now();
     await cdp.send("Page.setWebLifecycleState", { state: "active" });

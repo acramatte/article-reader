@@ -1,10 +1,12 @@
 const validId = id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id);
 
-// The native media element owns playback; polling is diagnostics/recovery only.
+// The native media element owns playback; SSE is diagnostics/recovery only.
 export class StreamingPlayer {
-  constructor({ audio, bookmarkReady, onUpdate, onRestore = () => {}, fetchImpl = fetch, now = () => performance.now(), pollMs = 1000 }) {
-    Object.assign(this, { audio, onUpdate, onRestore, fetchImpl, now, pollMs });
+  constructor({ audio, bookmarkReady, onUpdate, onRestore = () => {}, fetchImpl = fetch,
+    eventSource = url => new EventSource(url), now = () => performance.now() }) {
+    Object.assign(this, { audio, onUpdate, onRestore, fetchImpl, eventSource, now });
     this.controller = new AbortController();
+    this.statusRevision = 0;
     this.ready = bookmarkReady.then(bookmark => { this.bookmark = bookmark; });
     this.state = "loading";
     this.paused = false;
@@ -121,8 +123,7 @@ export class StreamingPlayer {
       this.audio.preload = "auto";
       this.audio.src = `/api/streaming/${this.id}/audio`;
       this.bindMediaSession();
-      this.poll = setInterval(() => void this.refresh(), this.pollMs);
-      void this.refresh();
+      this.connectStatus();
       if (!this.paused) await this.play();
     } catch (error) {
       if (!this.controller.signal.aborted) this.fail(error.message);
@@ -141,35 +142,77 @@ export class StreamingPlayer {
     this.state = "restoring";
     this.recoveryPhase = "connection";
     this.emit();
-    this.poll = setInterval(() => void this.refresh(), this.pollMs);
+    this.connectStatus();
     await this.refresh();
     return true;
   }
 
-  async refresh() {
-    if (!this.id || this.stopping || this.disposed) return;
+  connectStatus() {
+    if (this.events || !this.id || this.controller.signal.aborted || ["ready", "error", "stopped"].includes(this.snapshot?.state)) return;
+    const events = this.events = this.eventSource(`/api/streaming/${this.id}/events`);
+    events.addEventListener("status", event => {
+      if (this.events !== events || this.controller.signal.aborted) return;
+      this.snapshotTask = this.applySnapshot(JSON.parse(event.data));
+    });
+    events.onerror = () => {
+      if (this.events !== events || this.controller.signal.aborted) return;
+      this.warning = "Status connection interrupted. Reconnecting; the playback bookmark is retained.";
+      this.retryAvailable = this.restoring;
+      this.emit();
+      // Native EventSource retries transport errors. A permanent HTTP rejection
+      // closes it; inspect the JSON endpoint once for an actionable expiry/error.
+      if (events.readyState === 2) { this.closeStatus(); void this.refresh({ reconnect: false }); }
+    };
+  }
+
+  closeStatus() {
+    this.events?.close();
+    this.events = null;
+  }
+
+  async refresh({ reconnect = true } = {}) {
+    if (!this.id || this.controller.signal.aborted || this.stopping || this.disposed) return;
     if (this.refreshTask) return this.refreshTask;
-    this.refreshTask = this.fetchStatus();
+    this.refreshTask = this.fetchStatus(reconnect);
     try { await this.refreshTask; }
     finally { this.refreshTask = null; }
   }
 
-  async fetchStatus() {
+  async fetchStatus(reconnect) {
+    const revision = this.statusRevision;
     try {
       const snapshot = await this.json(`/api/streaming/${this.id}/status`);
       if (this.controller.signal.aborted) return;
+      // A delayed GET must not overwrite a newer event (especially ready/error).
+      if (revision !== this.statusRevision) return await this.snapshotTask;
+      await this.applySnapshot(snapshot);
+      if (reconnect) this.connectStatus();
+      else if (!this.controller.signal.aborted && snapshot.state === "generating") {
+        this.warning = "Status connection closed. Retry to reconnect; audio playback can continue.";
+        this.retryAvailable = true;
+        this.emit();
+      }
+    } catch (error) {
+      if (revision === this.statusRevision) this.statusFailure(error);
+    }
+  }
+
+  async applySnapshot(snapshot) {
+    if (this.controller.signal.aborted) return;
+    this.statusRevision++;
+    try {
       this.snapshot = snapshot;
+      if (["ready", "error", "stopped"].includes(snapshot.state)) this.closeStatus();
       if (["error", "stopped"].includes(snapshot.state)) return this.fail(snapshot.error || "Recording was stopped. Start a new narration explicitly.");
       this.warning = null;
       this.retryAvailable = false;
       if (this.restoring) {
         if (!this.contentRestored) {
-          const content = await this.json(`/api/streaming/${this.id}/content`);
+          const content = await (this.contentTask ??= this.json(`/api/streaming/${this.id}/content`));
           if (this.controller.signal.aborted) return;
-          this.onRestore(content);
-          this.contentRestored = true;
+          if (!this.contentRestored) { this.onRestore(content); this.contentRestored = true; }
         }
-        if (snapshot.state === "ready") {
+        if (this.snapshot.state === "ready") {
           this.recoveryPhase = "position";
           if (!this.audio.getAttribute("src") || this.audio.error) {
             this.seekTarget = null;
@@ -183,12 +226,17 @@ export class StreamingPlayer {
       }
       this.emit();
     } catch (error) {
-      if (this.controller.signal.aborted) return;
-      if (error.status === 404) return this.fail("Recording expired or the server restarted. Start a new narration explicitly.");
-      this.warning = `Could not reconnect: ${error.message}. The playback bookmark is retained.`;
-      this.retryAvailable = this.restoring;
-      this.emit();
+      this.contentTask = null;
+      this.statusFailure(error);
     }
+  }
+
+  statusFailure(error) {
+    if (this.controller.signal.aborted) return;
+    if (error.status === 404) return this.fail("Recording expired or the server restarted. Start a new narration explicitly.");
+    this.warning = `Could not reconnect: ${error.message}. The playback bookmark is retained.`;
+    this.retryAvailable = this.restoring;
+    this.emit();
   }
 
   restorePosition() {
@@ -242,7 +290,7 @@ export class StreamingPlayer {
     if (this.snapshot?.state !== "ready") return this.fail("Recording ended before synthesis completed.", true);
     this.state = "finished";
     this.paused = false;
-    clearInterval(this.poll);
+    this.closeStatus();
     this.bookmark.clear();
     this.updateMediaSession();
     this.emit();
@@ -254,7 +302,7 @@ export class StreamingPlayer {
     this.error = message;
     this.restoring = this.paused = false;
     this.controller.abort();
-    clearInterval(this.poll);
+    this.closeStatus();
     this.bookmark?.clear();
     this.audio.pause();
     this.updateMediaSession();
@@ -275,7 +323,7 @@ export class StreamingPlayer {
     this.state = "stopping";
     this.paused = false;
     this.controller.abort();
-    clearInterval(this.poll);
+    this.closeStatus();
     this.audio.pause();
     this.audio.removeAttribute("src");
     this.audio.load();
@@ -313,7 +361,7 @@ export class StreamingPlayer {
     this.savePosition(true);
     this.disposed = true;
     this.controller.abort();
-    clearInterval(this.poll);
+    this.closeStatus();
     for (const [name, listener] of Object.entries(this.listeners)) this.audio.removeEventListener(name, listener);
     this.audio.pause();
     this.audio.removeAttribute("src");

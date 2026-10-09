@@ -55,11 +55,12 @@ export function createStreamingApi(options, readJson) {
       json(201, { id: session.id, audioUrl: `/api/streaming/${session.id}/audio` });
       return true;
     }
-    const route = /^\/api\/streaming\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(status|content|audio|stop|mark)$/.exec(url.pathname);
+    const route = /^\/api\/streaming\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(status|events|content|audio|stop|mark)$/.exec(url.pathname);
     const session = route && narrations.sessions.get(route[1]);
     if (!session) { json(404, { error: "Streaming session expired or does not exist." }); return true; }
     const action = route[2];
     if (request.method === "GET" && action === "status") json(200, narrations.snapshot(session));
+    else if (request.method === "GET" && action === "events") narrations.events(session, response);
     else if (request.method === "GET" && action === "content") {
       if (session.text === null) json(410, { error: "Narration content is no longer available." });
       else json(200, { text: session.text, title: session.title, byline: session.byline, sourceUrl: session.sourceUrl,
@@ -74,6 +75,7 @@ export function createStreamingApi(options, readJson) {
       } else {
         session.mark = { at: Date.now(), generated: session.generated, bytes: session.bytes,
           audioSecondsGenerated: session.audioSecondsGenerated, playbackSeconds: body.playbackSeconds };
+        narrations.publish(session);
         json(200, narrations.snapshot(session));
       }
     } else json(405, { error: "Method not allowed." });

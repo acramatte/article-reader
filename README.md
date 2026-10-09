@@ -88,11 +88,13 @@ flowchart LR
 
 Grey, dashed components are external platforms outside our control; blue components are services we run.
 
-The Node backend extracts article text with Mozilla Readability and owns narration: small paragraph/sentence chunks feed a single FFmpeg encoder producing continuous MP3 audio, applying the selected speed with `atempo` and accounting audio duration at that tempo. The first chunk is capped at 220 characters, later chunks at 500. A native HTML audio element plays the growing stream before the full article is synthesized; foreground polling displays progress and handles recovery, not audio scheduling.
+The Node backend extracts article text with Mozilla Readability and owns narration: small paragraph/sentence chunks feed a single FFmpeg encoder producing continuous MP3 audio, applying the selected speed with `atempo` and accounting audio duration at that tempo. The first chunk is capped at 220 characters, later chunks at 500. A native HTML audio element plays the growing stream before the full article is synthesized; server-sent events (SSE) display progress and handle recovery, not audio scheduling.
+
+`GET /api/streaming/:id/events` sends a named `status` event containing the current snapshot immediately on connect/reconnect, then pushes preparation progress, warmup and terminal states. First-audio, chunk progress, warmup, consumer/mark changes and terminal states publish immediately; byte-only encoder updates are coalesced into the latest counters at most once every 250 ms, rather than publishing every MP3 frame. Immediate updates include pending counters, and completed snapshots contain the final byte count. It sends comment heartbeats every 15 seconds, allows at most four status subscribers per recording, and closes on ready/error/Stop. A stalled subscriber is disconnected instead of buffering unlimited updates; EventSource reconnects with the latest snapshot, so no event replay is required. Status disconnections neither cancel narration nor count as audio consumers. There is no recurring `/status` polling; the JSON snapshot endpoint remains for explicit recovery, retry, media-error diagnosis and completion checks. Both the reader and diagnostic page use SSE. Proxies must allow unbuffered long-lived responses; see [deployment](docs/deployment.md#vpn-only-access-and-browser-https).
 
 Browser API calls stay same-origin. Provider credentials remain on the reader backend, never in the browser. Article text, source metadata and recordings are retained temporarily on this reader instance for recovery; they do not survive a server restart. Browser storage contains only a validated session reference, title and best-known position, not article text or audio. With remote inference, text is sent to that service.
 
-Pause pauses listening, not generation. The server continues within its generation and storage limits. Stop cancels future requests, kills the encoder, removes the recording and clears its bookmark, but cannot interrupt speech computation already running on the inference service. Recovery waits for a growing recording to complete before seeking; completed files support byte ranges.
+Pause pauses listening, not generation. The server continues within its generation and storage limits. Stop cancels future requests, kills the encoder, removes the recording and clears its bookmark, but cannot interrupt speech computation already running on the inference service. Recovery restores an already-generated saved position in the growing recording and offers explicit Resume without waiting for the whole article; completed files also support byte ranges.
 
 ### Development servers
 
@@ -120,7 +122,7 @@ Set these environment variables on the **Node backend**:
 | `STREAM_MAX_AUDIO_BYTES` | `64000000` | Encoded bytes per recording. |
 | `STREAM_GENERATION_MS` | `1200000` | Twenty-minute synthesis/encoding deadline. |
 | `STREAM_RETENTION_MS` | `21600000` | Six-hour retention after generation or a terminal error. |
-| `STREAM_DISCONNECT_MS` | `120000` | Two-minute grace without audio consumers while generating; status polling does not extend it. |
+| `STREAM_DISCONNECT_MS` | `120000` | Two-minute grace without audio consumers while generating; status requests/SSE do not extend it. |
 | `STREAM_MAX_SESSIONS` | `4` | Retained session limit; inactive terminal sessions may be evicted for admission. |
 | `STREAM_SPOOL_DIR` | Instance-specific temporary directory | Dedicated writable spool, exclusive to this server; set an owned bounded tmpfs in read-only containers. |
 
