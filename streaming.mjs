@@ -103,6 +103,8 @@ export class StreamingNarrations {
   }
 
   async createSession({ text, voice, speed, title = "", byline = "", sourceUrl = "", paceSeconds = 0 }) {
+    const chunks = chunkText(text);
+    if (!chunks.length) throw Object.assign(new Error("Narration requires at least one letter or number."), { status: 400 });
     await (this.spoolReady ??= this.prepareSpool());
     if (this.closed) throw Object.assign(new Error("Narration server is shutting down."), { status: 503 });
     if (this.sessions.size >= this.maxSessions) {
@@ -116,7 +118,7 @@ export class StreamingNarrations {
     const file = await open(path, "wx", 0o600);
     await file.close();
     const session = { id: randomUUID(), directory, path, voice, speed, paceSeconds, text, title, byline, sourceUrl,
-      chunks: chunkText(text), controller: new AbortController(), state: "generating", warming: false,
+      chunks, controller: new AbortController(), state: "generating", warming: false,
       generated: 0, bytes: 0, audioSecondsGenerated: 0, startedAt: Date.now(), consumers: 0, firstByteSeconds: null };
     this.sessions.set(session.id, session);
     session.generationDeadline = Date.now() + this.generationMs;

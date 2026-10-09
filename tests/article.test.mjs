@@ -25,6 +25,15 @@ test("chunking keeps all text, respects first/regular limits, and preserves para
   assert.throws(() => chunkText("test", { firstLimit: 0 }), /positive/);
 });
 
+test("chunking skips punctuation-only paragraphs and fragments, preserving speech text and its punctuation", () => {
+  assert.deepEqual(chunkText("«»“”()[]\n\n«L’été arrive !»\n\n***\n\n2026\n\n漢字\n\n١٢"),
+    ["«L’été arrive !»", "2026", "漢字", "١٢"]);
+  const fragments = chunkText("-".repeat(20) + "«Salut.»" + "-".repeat(30), { firstLimit: 10, limit: 10 });
+  assert.ok(fragments.every(chunk => /[\p{L}\p{N}]/u.test(chunk) && chunk.length <= 10));
+  assert.equal(fragments.join("").replaceAll("-", ""), "«Salut.»");
+  assert.deepEqual(chunkText("  «»“”()[] — *** 🎵 \n\n ... "), []);
+});
+
 test("URL and IP validation rejects SSRF targets, credentials, schemes, and ports", async () => {
   for (const url of ["file:///etc/passwd", "ftp://example.com", "https://name:pass@example.com", "http://example.com:8000", "bad"]) assert.throws(() => validateUrl(url));
   for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "0.0.0.0", "::1", "fc00::1", "fe80::1", "::ffff:127.0.0.1", "224.0.0.1"]) assert.equal(isPublicAddress(ip), false, ip);

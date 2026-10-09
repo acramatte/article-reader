@@ -385,6 +385,7 @@ test("bounded admission, validation and cross-origin rejection happen before inf
     calls++; await delay(10_000, undefined, { signal }); return wav();
   } });
   for (const body of [null, {}, { text: " " }, { text: "x".repeat(100001), voice: "jane", speed: 1 },
+    { text: "«»“”()[] — *** 🎵", voice: "estelle", speed: 1 },
     { text: "hello", voice: "unknown", speed: 1 }, { text: "hello", voice: "jane", speed: 3 },
     { text: "hello", voice: "jane", speed: 1, paceSeconds: 100 },
     ...["af_heart", "af_nicole", "am_michael", "ff_siwis"].map(voice => ({ text: "hello", voice, speed: 1 }))]) {
@@ -396,6 +397,20 @@ test("bounded admission, validation and cross-origin rejection happen before inf
   const busy = await post("/api/streaming", { text: "Another", voice: "jane", speed: 1 });
   assert.equal(busy.status, 429);
   assert.equal(busy.headers.get("retry-after"), "2");
+});
+
+test("punctuation-only separators do not become speech requests or lose original narration content", async t => {
+  const { base, create, server } = await app(t);
+  const text = "«»“”()[]\n\n«L’été arrive !»\n\n***\n\n2026\n\n漢字\n\n١٢\n\n...";
+  const { id } = await create({ text, voice: "estelle" });
+  await server.narrations.sessions.get(id).done;
+  const ready = await status(base, id);
+  assert.equal(ready.state, "ready");
+  assert.equal(ready.generated, 4);
+  assert.equal(ready.total, 4);
+  assert.equal((await (await fetch(`${base}/api/streaming/${id}/content`)).json()).text, text);
+  const samples = await decodeMp3(Buffer.from(await (await fetch(`${base}/api/streaming/${id}/audio`)).arrayBuffer()));
+  assert.ok(Math.abs(samples.length / 24_000 - 12) < 0.15, "four 3-second speech chunks, no separator audio");
 });
 
 test("concurrent creation cannot bypass single-generation admission", async (t) => {
