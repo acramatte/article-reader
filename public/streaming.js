@@ -57,9 +57,13 @@ function finishRecovery() {
 }
 
 function restorePosition() {
-  if (!restoring || !recovery || snapshot?.state !== "ready" || !Number.isFinite(audio.duration)) return;
+  if (!restoring || !recovery || stopping || audio.readyState < 1) return;
+  const complete = snapshot?.state === "ready";
+  if (complete ? !Number.isFinite(audio.duration) : !(snapshot?.audioSecondsGenerated >= recovery.positionSeconds)) return;
   if (seekTarget === null) {
-    seekTarget = Math.min(recovery.positionSeconds, Math.max(0, audio.duration - 0.05));
+    seekTarget = complete
+      ? Math.min(recovery.positionSeconds, Math.max(0, audio.duration - 0.05))
+      : recovery.positionSeconds;
     if (Math.abs(audio.currentTime - seekTarget) < 0.05) return finishRecovery();
     audio.currentTime = seekTarget;
   } else if (!audio.seeking && Math.abs(audio.currentTime - seekTarget) < 0.5) finishRecovery();
@@ -68,7 +72,7 @@ function restorePosition() {
 function attachRecoveredAudio() {
   if (!restoring || (audio.getAttribute("src") && !audio.error)) return;
   audio.controls = false; // Prevent playback from zero before the saved seek completes.
-  audio.preload = "metadata";
+  audio.preload = "auto";
   seekTarget = null;
   audio.src = `/api/streaming/${id}/audio`;
   mediaSession(narrationTitle);
@@ -96,7 +100,7 @@ function render() {
   $("#mark").disabled = !id || audio.paused || snapshot?.state === "stopped" || snapshot?.state === "error";
   $("#refresh").disabled = !id;
   $("#resume").hidden = !recovery;
-  $("#resume").disabled = restoring || stopping || !id || snapshot?.state !== "ready" || !audio.paused;
+  $("#resume").disabled = restoring || stopping || !id || !["generating", "ready"].includes(snapshot?.state) || !audio.paused;
   if (snapshot) {
     const playedBeyondMark = Boolean(snapshot.mark && audio.currentTime > snapshot.mark.audioSecondsGenerated + 0.2);
     text("#evidence", !snapshot.mark ? "When speech starts, mark the test and lock your phone."
@@ -123,8 +127,12 @@ function applyStatus(result) {
     if (recovery) return forgetRecovery("Recording was stopped. Start a new narration explicitly.");
     message = "Stopped.";
   }
-  else if (restoring && snapshot.state === "ready") attachRecoveredAudio();
-  else if (restoring) message = "Recording is still generating. Waiting for completion before restoring its saved position…";
+  else if (restoring) {
+    attachRecoveredAudio();
+    message = snapshot.state === "ready" || snapshot.audioSecondsGenerated >= recovery.positionSeconds
+      ? "Restoring the saved position…" : "Recording is still generating. Waiting for audio at the saved position…";
+    restorePosition();
+  }
   else if (snapshot.warming) message = "Speech engine is waking up…";
   else if (!recovery && !firstPlaybackSeconds && audio.paused) message = "Preparing audio. If playback does not start, tap Play in the player.";
   render();
@@ -273,9 +281,9 @@ $("#mark").addEventListener("click", async () => {
 });
 $("#refresh").addEventListener("click", refresh);
 $("#resume").addEventListener("click", () => {
-  if (!restoring && snapshot?.state === "ready") void audio.play().catch(playError);
+  if (!restoring && ["generating", "ready"].includes(snapshot?.state)) void audio.play().catch(playError);
 });
-for (const event of ["loadedmetadata", "durationchange", "seeked"]) audio.addEventListener(event, restorePosition);
+for (const event of ["loadedmetadata", "durationchange", "seeked", "progress"]) audio.addEventListener(event, restorePosition);
 audio.addEventListener("timeupdate", () => savePosition());
 audio.addEventListener("seeked", () => savePosition(true));
 

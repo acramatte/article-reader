@@ -150,6 +150,39 @@ test("default reader reload and a reopened tab restore the same real recording; 
   expect(await reopened.evaluate((key) => localStorage.getItem(key), BOOKMARK_KEY)).toBeNull();
 });
 
+test("reload during playback restores and resumes a still-generating MP3 without new synthesis", async ({ page, request }) => {
+  let creates = 0;
+  page.on("request", req => {
+    if (req.method() === "POST" && new URL(req.url()).pathname === "/api/streaming") creates++;
+  });
+  // Real synthesis and encoding; deliberate pacing keeps later chunks unfinished.
+  await page.route("**/api/streaming", route => route.continue({
+    postData: JSON.stringify({ ...route.request().postDataJSON(), paceSeconds: 8 }),
+  }));
+  await page.goto("/");
+  await page.locator("#paste-fallback").click();
+  await page.locator("#text").fill(paragraphs.join("\n\n"));
+  await page.locator("#read-start").click();
+  await expect.poll(() => nativeTime(page), { timeout: 60_000 }).toBeGreaterThan(3);
+  await page.reload(); // pagehide saves the playing position, not a manually planted bookmark.
+  const saved = await bookmark(page);
+  expect(saved.positionSeconds).toBeGreaterThan(3);
+  await expect(page.locator("#status")).toHaveText("Saved recording ready. Press Resume.");
+  await expect(page.locator("#pause")).toBeEnabled();
+  expect(await nativeTime(page)).toBeCloseTo(saved.positionSeconds, 1);
+  expect(await page.locator("#narration-audio").evaluate(audio => audio.paused)).toBe(true);
+  expect((await (await request.get(`/api/streaming/${saved.id}/status`)).json()).state).toBe("generating");
+  await page.waitForTimeout(300);
+  expect(await nativeTime(page)).toBeCloseTo(saved.positionSeconds, 1);
+  await page.locator("#pause").click();
+  await expect.poll(() => nativeTime(page)).toBeGreaterThan(saved.positionSeconds + 0.3);
+  expect((await bookmark(page)).id).toBe(saved.id);
+  expect(creates).toBe(1);
+  await page.locator("#stop").click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
+  expect(await bookmark(page)).toBeNull();
+});
+
 test("private URL is blocked and extraction failure can recover with pasted text", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Webpage URL").fill("http://127.0.0.1/secret");

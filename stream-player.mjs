@@ -41,7 +41,7 @@ export class StreamingPlayer {
         this.emit();
       },
       timeupdate: () => { this.savePosition(); this.updateMediaSession(); this.emit(); },
-      progress: () => this.emit(),
+      progress: () => { this.restorePosition(); this.emit(); },
       loadedmetadata: () => this.restorePosition(),
       durationchange: () => this.restorePosition(),
       seeked: () => { this.restorePosition(); this.savePosition(true); },
@@ -212,17 +212,16 @@ export class StreamingPlayer {
           if (this.controller.signal.aborted) return;
           if (!this.contentRestored) { this.onRestore(content); this.contentRestored = true; }
         }
-        if (this.snapshot.state === "ready") {
-          this.recoveryPhase = "position";
-          if (!this.audio.getAttribute("src") || this.audio.error) {
-            this.seekTarget = null;
-            this.audio.preload = "auto";
-            this.audio.src = `/api/streaming/${this.id}/audio`;
-            this.bindMediaSession();
-            this.audio.load();
-          }
-          this.restorePosition();
-        } else this.recoveryPhase = "generation";
+        this.recoveryPhase = this.snapshot.state === "ready" || this.snapshot.audioSecondsGenerated >= this.recovery.positionSeconds
+          ? "position" : "generation";
+        if (!this.audio.getAttribute("src") || this.audio.error) {
+          this.seekTarget = null;
+          this.audio.preload = "auto";
+          this.audio.src = `/api/streaming/${this.id}/audio`;
+          this.bindMediaSession();
+          this.audio.load();
+        }
+        this.restorePosition();
       }
       this.emit();
     } catch (error) {
@@ -240,9 +239,15 @@ export class StreamingPlayer {
   }
 
   restorePosition() {
-    if (!this.restoring || this.stopping || this.disposed || this.snapshot?.state !== "ready" || !this.contentRestored || !Number.isFinite(this.audio.duration)) return;
+    if (!this.restoring || this.stopping || this.disposed || !this.contentRestored || this.audio.readyState < 1) return;
+    const complete = this.snapshot?.state === "ready";
+    if (complete ? !Number.isFinite(this.audio.duration) : !(this.snapshot?.audioSecondsGenerated >= this.recovery.positionSeconds)) return;
     if (this.seekTarget == null) {
-      this.seekTarget = Math.min(this.recovery.positionSeconds, Math.max(0, this.audio.duration - 0.05));
+      // Growing MP3 duration can be Infinity or an estimate of its current prefix.
+      // Only a completed recording has a final duration to clamp against.
+      this.seekTarget = complete
+        ? Math.min(this.recovery.positionSeconds, Math.max(0, this.audio.duration - 0.05))
+        : this.recovery.positionSeconds;
       if (Math.abs(this.audio.currentTime - this.seekTarget) >= 0.05) {
         this.audio.currentTime = this.seekTarget;
         return;
