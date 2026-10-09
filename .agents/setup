@@ -65,10 +65,34 @@ install_ffmpeg() {
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg
 }
 
+install_funes() {
+  # Agent-memory CLI (https://github.com/huggingface/funes): recall over past
+  # sessions and `funes mcp` for read tools. Used by scripts/funes-sync.mjs.
+  if command -v funes >/dev/null 2>&1; then
+    echo "    funes $(funes --version 2>/dev/null || echo present)"
+    return
+  fi
+  curl -fsSL https://huggingface.co/buckets/huggingface/funes/resolve/install.sh | sh
+}
+
+install_trufflehog() {
+  # Secret scanner (https://github.com/trufflesecurity/trufflehog); `funes push`
+  # refuses to run without it, so it is required to publish a memory.
+  if command -v trufflehog >/dev/null 2>&1; then
+    echo "    trufflehog $(trufflehog --version 2>/dev/null || echo present)"
+    return
+  fi
+  curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b "$HOME/.local/bin"
+}
+
 step "node v$node_version" install_node
 persist_node_path
 export PATH="$node_dir/bin:$PATH"
+# funes and trufflehog install into ~/.local/bin; make sure it is on PATH.
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
 step "ffmpeg" install_ffmpeg
+step "funes" install_funes
+step "trufflehog" install_trufflehog
 step "npm ci" npm ci --include=dev --no-audit --no-fund
 step "playwright chromium" npx --no-install playwright install chromium
 

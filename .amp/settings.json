@@ -1,0 +1,9 @@
+{
+  "$schema": "https://ampcode.com/cli-settings.schema.json",
+  "amp.mcpServers": {
+    "funes": {
+      "command": "funes",
+      "args": ["mcp", "acramatte/funes-memory"]
+    }
+  }
+}
