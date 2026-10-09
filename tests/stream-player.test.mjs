@@ -14,6 +14,7 @@ class MediaFixture extends EventTarget {
     this.paused = true;
     this.ended = false;
     this.duration = 12;
+    this.readyState = 1;
     this.position = 0;
     this.seeking = false;
     this.playbackRate = 1;
@@ -206,18 +207,32 @@ test("recovery restores content and position but requires an explicit play actio
   assert.equal(calls.filter(call => call.path === "/api/streaming").length, 0);
 });
 
-test("in-progress recovery waits for completion without playing or overwriting the saved position", async t => {
-  let complete = false;
-  const { player, audio, bookmark, calls } = fixture(t, path => path.endsWith("/status") ? { ...ready, state: complete ? "ready" : "generating" } : content);
+test("in-progress recovery waits only for audio at the saved position, then offers explicit Resume", async t => {
+  const generating = { state: "generating", generated: 1, total: 3, audioSecondsGenerated: 5.99 };
+  const { player, audio, bookmark, calls, events, updates } = fixture(t, path => path.endsWith("/status") ? generating : content);
+  audio.duration = Infinity;
   bookmark.save({ id, title: content.title, positionSeconds: 6 }, true);
   await player.restore();
-  assert.equal(audio.src, undefined);
+  assert.equal(audio.src, `/api/streaming/${id}/audio`);
+  audio.dispatchEvent(new Event("timeupdate"));
   assert.equal(bookmark.load().positionSeconds, 6);
   await player.togglePause();
   assert.equal(audio.playCalls, 0);
-  complete = true;
-  await player.refresh();
+  assert.equal(updates.at(-1).recovering, true);
+  audio.readyState = 0;
+  events[0].send({ ...generating, audioSecondsGenerated: 6.01 });
+  await tick();
+  assert.equal(updates.at(-1).recovering, true);
+  assert.equal(bookmark.load().positionSeconds, 6);
+  audio.readyState = 1;
+  audio.dispatchEvent(new Event("loadedmetadata"));
   assert.equal(audio.currentTime, 6);
+  assert.equal(updates.at(-1).recovering, false);
+  assert.equal(updates.at(-1).paused, true);
+  assert.equal(audio.playCalls, 0);
+  await player.togglePause();
+  assert.equal(audio.playCalls, 1);
+  assert.equal(calls.filter(call => call.path === "/api/streaming").length, 0);
   assert.equal(calls.filter(call => call.path.endsWith("/content")).length, 1);
 });
 

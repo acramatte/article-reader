@@ -106,16 +106,22 @@ test("Stop during recovery ignores a late ready status and cannot recreate the b
   } finally { release(); }
 });
 
-test("in-progress recovery waits for completed audio before seeking without recreating narration", async ({ page, request }) => {
-  const id = await recoveryFixture(page, request, 5);
+test("in-progress recovery seeks and resumes generated audio before completion without recreating narration", async ({ page, request }) => {
+  const id = await recoveryFixture(page, request, 8);
+  let creates = 0;
+  page.on("request", req => {
+    if (req.method() === "POST" && new URL(req.url()).pathname === "/api/streaming") creates++;
+  });
   await page.reload();
-  await expect(page.locator("#status")).toContainText("still generating");
-  await expect(page.locator("#resume")).toBeDisabled();
-  expect(await page.locator("#audio").getAttribute("src")).toBeNull();
-  await expect(page.locator("#resume")).toBeEnabled({ timeout: 90_000 });
+  await expect(page.locator("#resume")).toBeEnabled({ timeout: 60_000 });
+  expect(await page.locator("#audio").getAttribute("src")).toBe(`/api/streaming/${id}/audio`);
   expect(await page.evaluate(() => window.streamingProbe().id)).toBe(id);
   expect(await page.evaluate(() => window.streamingProbe().currentTime)).toBeCloseTo(6, 0);
   expect(await page.evaluate(() => window.streamingProbe().paused)).toBe(true);
+  expect((await (await request.get(`/api/streaming/${id}/status`)).json()).state).toBe("generating");
+  await page.locator("#resume").click();
+  await expect.poll(() => page.evaluate(() => window.streamingProbe().currentTime)).toBeGreaterThan(6.3);
+  expect(creates).toBe(0);
   await page.locator("#stop").click();
 });
 
