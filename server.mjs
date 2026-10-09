@@ -69,9 +69,9 @@ export function createApp({
       }
       if (request.method === "POST" && url.pathname === "/api/tts") {
         const body = await readJson(request);
-        if (typeof body?.text !== "string" || !body.text.trim() || body.text.length > 1_000 ||
+        if (typeof body?.text !== "string" || !/[\p{L}\p{N}]/u.test(body.text) || body.text.length > 1_000 ||
             !voices.has(body.voice) || body.speed !== 1) {
-          return json(400, { error: "Raw WAV requires 1–1,000 characters, a supported voice, and speed 1. Use /api/streaming for adjusted speed." });
+          return json(400, { error: "Raw WAV requires 1–1,000 characters containing a letter or number, a supported voice, and speed 1. Use /api/streaming for adjusted speed." });
         }
         const upstream = await provider.fetchWav({ text: body.text, voice: body.voice, speed: body.speed },
           AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]));

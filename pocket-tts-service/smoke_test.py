@@ -86,7 +86,8 @@ if __name__ == "__main__":
         long_text = ((TEXT + " ") * 20)[:1000]
         validate_wav(request("/tts", {"text": long_text, "voice": "jane", "speed": 1}), long_text)
     for body in (
-        {"text": " "}, {"text": "x" * 1001}, {"text": TEXT, "voice": "unknown"}, {"text": TEXT, "voice": "af_bella"},
+        {"text": " "}, {"text": "«»“”()[] — *** 🎵", "voice": "estelle"},
+        {"text": "x" * 1001}, {"text": TEXT, "voice": "unknown"}, {"text": TEXT, "voice": "af_bella"},
         *({"text": TEXT, "voice": voice} for voice in ("af_heart", "af_nicole", "am_michael", "ff_siwis")),
         {"text": TEXT, "voice": "/tmp/voice.pt"}, {"text": TEXT, "speed": 0.49},
         {"text": TEXT, "speed": 0.5}, {"text": TEXT, "speed": 2},

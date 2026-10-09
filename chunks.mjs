@@ -6,8 +6,8 @@ export function chunkText(text, { firstLimit = 220, limit = 500 } = {}) {
   const chunks = [];
   let current = "";
   const capacity = () => chunks.length === 0 ? firstLimit : limit;
-  const flush = () => { if (current) { chunks.push(current); current = ""; } };
-  for (const paragraph of text.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, " ").trim()).filter(Boolean)) {
+  const flush = () => { if (/[\p{L}\p{N}]/u.test(current)) chunks.push(current); current = ""; };
+  for (const paragraph of text.split(/\n\s*\n/).map((p) => p.replace(/\s+/g, " ").trim()).filter(p => /[\p{L}\p{N}]/u.test(p))) {
     flush();
     let remaining = paragraph;
     while (remaining.length > capacity()) {

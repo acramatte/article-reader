@@ -252,6 +252,7 @@ test("raw WAV API rejects non-1 speeds before synthesis and directs callers to s
 test("API rejects invalid requests and cross-origin browser calls", async (t) => {
   const post = await app(t);
   for (const body of [null, {}, { text: "", voice: "jane", speed: 1 }, { text: "x".repeat(1001), voice: "jane", speed: 1 }, { text: "Hi", voice: "unknown", speed: 1 }, { text: "Hi", voice: "jane", speed: 3 }]) assert.equal((await post("/api/tts", body)).status, 400);
+  assert.equal((await post("/api/tts", { text: "«»“”()[] — *** 🎵", voice: "estelle", speed: 1 })).status, 400);
   assert.equal((await post("/api/article", {})).status, 400);
   assert.equal((await post("/api/article", { url: "http://localhost" })).status, 400);
   assert.equal((await post("/api/article", {}, { Origin: "https://evil.example" })).status, 403);

@@ -35,7 +35,7 @@ admission = threading.BoundedSemaphore(2)
 
 class TTSRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    text: str = Field(min_length=1, max_length=1_000, pattern=r"\S")
+    text: str = Field(min_length=1, max_length=1_000, pattern=r"[\p{L}\p{N}]")
     voice: Literal["jane", "bill_boerst", "estelle"] = "jane"
     # Only the reader's MP3 encoder adjusts tempo. Reject rather than ignore speed.
     speed: Literal[1.0] = 1.0
