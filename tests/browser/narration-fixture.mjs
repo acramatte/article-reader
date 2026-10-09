@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { expect } from "@playwright/test";
 
 export const BOOKMARK_KEY = "reader.streaming.resume.v1";
@@ -34,6 +36,42 @@ export async function mockNarration(page, { seconds = 12, state = "ready", gener
   const fixture = { requests: [], stops: [], contentReads: [], mediaReads: [], statusReads: [], sessions: new Map(),
     status: { state, generated, total, warming }, statusCode: 200, admissionError: null,
     mediaGate, stopGate, statusGate, admissionGate };
+  // Playwright fulfill buffers entire responses. Use a real HTTP stream so native
+  // EventSource receives pushes and reconnects without a test-side polling timer.
+  const observers = new Set();
+  fixture.eventReads = [];
+  const send = response => {
+    response.write(`event: status\ndata: ${JSON.stringify(fixture.status)}\n\n`);
+    if (["ready", "error", "stopped"].includes(fixture.status.state)) response.end();
+  };
+  const publish = () => { for (const response of observers) if (!response.writableEnded) send(response); };
+  let snapshot;
+  Object.defineProperty(fixture, "status", {
+    get: () => snapshot,
+    set: value => {
+      snapshot = new Proxy(value, { set(target, key, next) { target[key] = next; publish(); return true; } });
+      publish();
+    },
+  });
+  fixture.status = { state, generated, total, warming };
+  fixture.disconnectStatus = () => { for (const response of observers) response.destroy(); };
+  const eventServer = createServer(async (request, response) => {
+    const id = request.url.split("/")[3];
+    fixture.eventReads.push(id);
+    if (fixture.statusGate) await fixture.statusGate.promise;
+    if (response.destroyed) return;
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    if (!fixture.sessions.has(id) || fixture.statusCode !== 200) {
+      response.writeHead(fixture.sessions.has(id) ? fixture.statusCode : 404, { "Content-Type": "application/json" });
+      return response.end(JSON.stringify({ error: "Synthetic recording expired" }));
+    }
+    response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
+    observers.add(response);
+    response.on("close", () => observers.delete(response));
+    send(response);
+  }).listen(0, "127.0.0.1");
+  await once(eventServer, "listening");
+  page.on("close", () => { eventServer.closeAllConnections(); eventServer.close(); });
   const body = syntheticWav(seconds);
   await page.route("**/api/streaming{,/**}", async (route) => {
     const request = route.request();
@@ -48,7 +86,8 @@ export async function mockNarration(page, { seconds = 12, state = "ready", gener
       fixture.id = id;
       return route.fulfill({ status: 201, json: { id } });
     }
-    const [, id, action] = path.match(/^\/api\/streaming\/([^/]+)\/(status|content|audio|stop)$/) || [];
+    const [, id, action] = path.match(/^\/api\/streaming\/([^/]+)\/(status|events|content|audio|stop)$/) || [];
+    if (action === "events") return route.continue({ url: `http://127.0.0.1:${eventServer.address().port}${path}` });
     if (!id || !fixture.sessions.has(id)) return route.fulfill({ status: 404, json: { error: "Synthetic recording expired" } });
     if (action === "status") {
       fixture.statusReads.push(id);

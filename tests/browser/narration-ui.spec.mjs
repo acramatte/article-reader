@@ -51,6 +51,45 @@ test("native playback ticks preserve unchanged labels and disabled attributes (U
   await expect(page.locator("#status")).toHaveText("Stopped");
 });
 
+test("native SSE pushes paused progress and recovers a dropped status connection without polling", async ({ page }) => {
+  const fixture = await mockNarration(page, { state: "generating", generated: 1, total: 4, seconds: 30 });
+  await startPasted(page);
+  await expect(page.locator("#status")).toHaveText("Playing");
+  await expect(page.locator("#progress")).toHaveText("1 / 4");
+  const before = await nativeTime(page);
+  fixture.disconnectStatus();
+  await expect(page.locator("#recovery-note")).toContainText("Reconnecting");
+  await expect.poll(() => nativeTime(page)).toBeGreaterThan(before + 0.3);
+  await page.locator("#pause").click();
+  fixture.status.generated = 3; // Updates missed during disconnect are recovered from the next snapshot.
+  await expect(page.locator("#progress")).toHaveText("3 / 4");
+  await expect(page.locator("#status")).toHaveText("Paused");
+  await expect(page.locator("#recovery-note")).toBeHidden();
+  fixture.status = { state: "ready", generated: 4, total: 4, warming: false };
+  await expect(page.locator("#progress")).toHaveText("4 / 4");
+  await page.waitForTimeout(1500);
+  expect(fixture.eventReads).toHaveLength(2);
+  expect(fixture.statusReads).toHaveLength(0);
+  expect(fixture.requests).toHaveLength(1);
+  expect(fixture.stops).toHaveLength(0);
+  await page.locator("#stop").click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
+});
+
+test("a permanent SSE rejection reports expiry without an automatic request loop", async ({ page }) => {
+  const fixture = await mockNarration(page, { state: "generating", generated: 0 });
+  fixture.statusCode = 404;
+  await startPasted(page);
+  await expect(page.locator("#status")).toContainText("Recording expired or the server restarted");
+  await expect(page.locator("#read-start")).toBeEnabled();
+  expect(await page.evaluate(() => localStorage.getItem("reader.streaming.resume.v1"))).toBeNull();
+  await page.waitForTimeout(1500);
+  expect(fixture.eventReads).toHaveLength(1);
+  expect(fixture.statusReads).toHaveLength(1);
+  expect(fixture.requests).toHaveLength(1);
+  expect(fixture.stops).toHaveLength(0);
+});
+
 test("synthetic startup status clears when native audio starts without a second creation", async ({ page }) => {
   const mediaGate = deferred();
   const fixture = await mockNarration(page, { state: "generating", generated: 0, warming: true, mediaGate });

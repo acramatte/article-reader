@@ -85,6 +85,141 @@ function centralFrequency(samples, windowSeconds = 0.4) {
 const status = (base, id) => fetch(`${base}/api/streaming/${id}/status`).then(r => r.json());
 const recordingEntries = async directory => (await readdir(directory)).filter(name => name !== ".reader-instance.lock");
 
+async function* statusEvents(response) {
+  let buffer = "";
+  for await (const bytes of response.body) {
+    buffer += Buffer.from(bytes).toString();
+    let end;
+    while ((end = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      if (frame.startsWith("event: status\n")) yield JSON.parse(frame.slice(frame.indexOf("data: ") + 6));
+    }
+  }
+}
+
+async function nextStatus(events, accept) {
+  for (;;) {
+    const { value, done } = await events.next();
+    assert.equal(done, false, "status connection ended before the expected state");
+    if (accept(value)) return value;
+  }
+}
+
+test("SSE sends live progress and a fresh reconnect snapshot, then closes on readiness", async t => {
+  const chunks = new EventTarget();
+  const { base, create, post } = await app(t, { synthesizeChunk: async (_body, signal, warming) => {
+    warming(true);
+    await once(chunks, "chunk", { signal });
+    warming(false);
+    return wav();
+  } });
+  const { id } = await create();
+  const disconnect = new AbortController();
+  const response = await fetch(`${base}/api/streaming/${id}/events`, { signal: disconnect.signal });
+  assert.equal(response.headers.get("content-type"), "text/event-stream");
+  assert.match(response.headers.get("cache-control"), /no-store/);
+  assert.equal(response.headers.get("x-accel-buffering"), "no");
+  const events = statusEvents(response);
+  const initial = await nextStatus(events, s => s.warming);
+  assert.equal(initial.state, "generating");
+  assert.equal(initial.generated, 0);
+  assert.equal(initial.consumers, 0, "status is not an audio consumer");
+  chunks.dispatchEvent(new Event("chunk"));
+  const progress = await nextStatus(events, s => s.generated === 1);
+  assert.equal(progress.audioSecondsGenerated, 3);
+  assert.equal(progress.total, 2);
+  disconnect.abort();
+  const reconnect = await fetch(`${base}/api/streaming/${id}/events`, { signal: AbortSignal.timeout(5000) });
+  const resumed = statusEvents(reconnect);
+  const latest = (await resumed.next()).value;
+  assert.equal(latest.generated, 1);
+  assert.equal(latest.state, "generating");
+  await post(`/api/streaming/${id}/mark`, { playbackSeconds: 0.5 });
+  assert.equal((await nextStatus(resumed, s => s.mark)).mark.playbackSeconds, 0.5);
+  chunks.dispatchEvent(new Event("chunk"));
+  const ready = await nextStatus(resumed, s => s.state === "ready");
+  assert.equal(ready.generated, 2);
+  assert.ok(ready.bytes > 0);
+  assert.equal(ready.warming, false);
+  assert.ok(ready.expiresAt > Date.now());
+  assert.equal((await resumed.next()).done, true);
+  // A connection to an already-complete recording also sends one snapshot and ends.
+  const complete = statusEvents(await fetch(`${base}/api/streaming/${id}/events`));
+  assert.equal((await complete.next()).value.state, "ready");
+  assert.equal((await complete.next()).done, true);
+});
+
+test("SSE coalesces encoder byte bursts but delivers the latest counters and final state", async t => {
+  const chunks = new EventTarget();
+  let calls = 0;
+  const { base, create, post } = await app(t, { synthesizeChunk: async (_body, signal, warming) => {
+    const first = calls++ === 0;
+    warming(true);
+    await once(chunks, "chunk", { signal });
+    warming(false);
+    return wav(first ? 120 : 3);
+  } });
+  const { id } = await create();
+  const response = await fetch(`${base}/api/streaming/${id}/events`, { signal: AbortSignal.timeout(10000) });
+  const received = [];
+  const finished = (async () => { for await (const snapshot of statusEvents(response)) received.push(snapshot); })();
+  finished.catch(() => {}); // Cleanup can close the reader if an earlier assertion fails.
+  // Subscribe before emitting a large, fast-encoded chunk: many small stdout writes.
+  await until(() => received.at(-1), s => s?.warming);
+  chunks.dispatchEvent(new Event("chunk"));
+  const encoded = await until(() => status(base, id), s => s.generated === 1 && s.bytes > 950_000);
+  await until(() => received.at(-1), s => s?.bytes >= encoded.bytes);
+  assert.equal(received.at(-1).state, "generating", "trailing byte update does not wait for the next chunk");
+  assert.equal(received.at(-1).audioSecondsGenerated, 120);
+  const stable = ({ bytes, elapsedSeconds, ...rest }) => JSON.stringify(rest);
+  const byteOnly = received.filter((s, i) => i && stable(s) === stable(received[i - 1]));
+  const elapsed = received.at(-1).elapsedSeconds - received[0].elapsedSeconds;
+  assert.ok(byteOnly.length <= Math.ceil(elapsed * 4), `received ${byteOnly.length} byte-only updates in ${elapsed}s`);
+  for (let i = 1; i < byteOnly.length; i++) {
+    assert.ok(byteOnly[i].elapsedSeconds - byteOnly[i - 1].elapsedSeconds >= 0.24, "byte bursts are bounded to four updates per second");
+  }
+  await post(`/api/streaming/${id}/mark`, { playbackSeconds: 6 });
+  await until(() => received.at(-1), s => s?.mark?.playbackSeconds === 6);
+  chunks.dispatchEvent(new Event("chunk"));
+  await finished;
+  const final = received.at(-1);
+  assert.equal(final.state, "ready");
+  assert.equal(final.generated, 2);
+  assert.equal(final.audioSecondsGenerated, 123);
+  assert.equal(final.bytes, (await status(base, id)).bytes);
+  const recording = Buffer.from(await (await fetch(`${base}/api/streaming/${id}/audio`)).arrayBuffer());
+  assert.equal(recording.length, final.bytes, "coalescing status does not lose audio bytes");
+});
+
+test("SSE cannot extend the no-audio grace, bounds observers, and closes with errors or Stop", async t => {
+  const { base, create, post } = await app(t, { disconnectMs: 500, synthesizeChunk: async (_body, signal) => {
+    await delay(10000, undefined, { signal }); return wav();
+  } });
+  const { id } = await create();
+  const connections = await Promise.all(Array.from({ length: 4 }, () =>
+    fetch(`${base}/api/streaming/${id}/events`, { signal: AbortSignal.timeout(5000) })));
+  const observers = connections.map(statusEvents);
+  for (const observer of observers) assert.equal((await observer.next()).value.consumers, 0);
+  assert.equal((await fetch(`${base}/api/streaming/${id}/events`)).status, 429);
+  assert.equal((await fetch(`${base}/api/streaming/${id}/events`, { headers: { Origin: "https://evil.example" } })).status, 403);
+  for (const observer of observers) {
+    assert.equal((await nextStatus(observer, s => s.state === "stopped")).warming, false);
+    assert.equal((await observer.next()).done, true);
+  }
+  const failure = await app(t, { synthesizeChunk: async () => { throw new Error("SSE provider failure fixture"); } });
+  const failed = await failure.create();
+  const errors = statusEvents(await fetch(`${failure.base}/api/streaming/${failed.id}/events`));
+  assert.equal((await nextStatus(errors, s => s.state === "error")).error, "SSE provider failure fixture");
+  assert.equal((await errors.next()).done, true);
+  const stopped = await create();
+  const stopEvents = statusEvents(await fetch(`${base}/api/streaming/${stopped.id}/events`));
+  await stopEvents.next();
+  await post(`/api/streaming/${stopped.id}/stop`, {});
+  assert.equal((await nextStatus(stopEvents, s => s.state === "stopped")).state, "stopped");
+  assert.equal((await stopEvents.next()).done, true);
+});
+
 test("spool ownership lock stays inside its writable mount on a read-only runtime", async t => {
   const parent = await mkdtemp(join(tmpdir(), "reader-readonly-"));
   const spoolDir = join(parent, "spool");

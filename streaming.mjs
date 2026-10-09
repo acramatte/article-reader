@@ -119,7 +119,8 @@ export class StreamingNarrations {
     await file.close();
     const session = { id: randomUUID(), directory, path, voice, speed, paceSeconds, text, title, byline, sourceUrl,
       chunks, controller: new AbortController(), state: "generating", warming: false,
-      generated: 0, bytes: 0, audioSecondsGenerated: 0, startedAt: Date.now(), consumers: 0, firstByteSeconds: null };
+      generated: 0, bytes: 0, audioSecondsGenerated: 0, startedAt: Date.now(), consumers: 0, firstByteSeconds: null,
+      subscribers: new Set() };
     this.sessions.set(session.id, session);
     session.generationDeadline = Date.now() + this.generationMs;
     session.generationTimer = setTimeout(() => {
@@ -146,6 +147,61 @@ export class StreamingNarrations {
       generatedAfterMark: session.mark ? session.generated - session.mark.generated : null };
   }
 
+  publish(session, { coalesce = false } = {}) {
+    if (coalesce) {
+      if (!session.subscribers.size || session.statusTimer) return;
+      // Keep only one pending update, and snapshot the latest counters when it fires.
+      session.statusTimer = setTimeout(() => {
+        session.statusTimer = null;
+        this.publish(session);
+      }, 250);
+      session.statusTimer.unref();
+      return;
+    }
+    // Meaningful changes (including terminal states) flush pending counters immediately.
+    clearTimeout(session.statusTimer);
+    session.statusTimer = null;
+    if (!session.subscribers.size) return;
+    const snapshot = this.snapshot(session);
+    for (const send of session.subscribers) send(snapshot);
+  }
+
+  events(session, response) {
+    if (session.subscribers.size >= 4) {
+      throw Object.assign(new Error("Too many status connections for this recording."), { status: 429 });
+    }
+    response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store, no-transform",
+      "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" });
+    response.flushHeaders();
+    let heartbeat;
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      session.subscribers.delete(send);
+      response.off("close", cleanup);
+    };
+    // A slow observer must not queue unbounded snapshots or block synthesis/audio.
+    const write = data => {
+      if (response.destroyed || response.writableEnded || !response.write(data)) {
+        cleanup();
+        response.destroy();
+        return false;
+      }
+      return true;
+    };
+    const send = snapshot => {
+      if (write(`event: status\ndata: ${JSON.stringify(snapshot)}\n\n`) && terminal(snapshot.state)) {
+        cleanup();
+        response.end();
+      }
+    };
+    response.on("close", cleanup);
+    session.subscribers.add(send);
+    heartbeat = setInterval(() => write(": heartbeat\n\n"), 15_000);
+    heartbeat.unref();
+    // No replay log is needed: every connection starts with the current state.
+    send(this.snapshot(session));
+  }
+
   armDisconnect(session) {
     clearTimeout(session.disconnectTimer);
     if (!session.consumers && !terminal(session.state)) {
@@ -168,7 +224,9 @@ export class StreamingNarrations {
           offset += bytesWritten;
           session.bytes += bytesWritten;
         }
-        if (session.firstByteSeconds === null) session.firstByteSeconds = (Date.now() - session.startedAt) / 1000;
+        const first = session.firstByteSeconds === null;
+        if (first) session.firstByteSeconds = (Date.now() - session.startedAt) / 1000;
+        this.publish(session, { coalesce: !first });
       }
     } finally { await file.close(); }
   }
@@ -196,12 +254,15 @@ export class StreamingNarrations {
         if (session.generated && session.paceSeconds) await delay(session.paceSeconds * 1000, undefined, { signal });
         signal.throwIfAborted();
         const wav = await this.synthesizeChunk({ text, voice: session.voice, speed: 1 }, signal,
-          warming => { session.warming = warming; });
+          warming => {
+            if (session.warming !== warming) { session.warming = warming; this.publish(session); }
+          });
         signal.throwIfAborted();
         const pcm = pcmFromWav(wav);
         await new Promise((resolve, reject) => encoder.stdin.write(pcm, error => error ? reject(error) : resolve()));
         session.generated++;
         session.audioSecondsGenerated += pcm.length / 48_000 / session.speed;
+        this.publish(session);
       }
       encoder.stdin.end();
       const code = await exited;
@@ -230,6 +291,7 @@ export class StreamingNarrations {
         if (session.state === "error") this.retain(session);
       }
       session.chunks.fill(""); // Only the bounded recovery snapshot retains ready-session text.
+      this.publish(session);
     }
   }
 
@@ -241,6 +303,8 @@ export class StreamingNarrations {
     session.text = null;
     session.chunks.fill("");
     session.state = "stopped";
+    session.warming = false;
+    this.publish(session);
     session.controller.abort();
     session.encoder?.kill("SIGKILL");
     await session.done;
@@ -273,6 +337,7 @@ export class StreamingNarrations {
     const disconnected = () => controller.abort();
     response.on("close", disconnected);
     session.consumers++;
+    this.publish(session);
     clearTimeout(session.disconnectTimer);
     let file;
     try {
@@ -327,6 +392,7 @@ export class StreamingNarrations {
       await file?.close();
       response.off("close", disconnected);
       session.consumers--;
+      this.publish(session);
       this.armDisconnect(session);
     }
   }

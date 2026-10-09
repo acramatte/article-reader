@@ -6,6 +6,8 @@ The successful experiment is now the default reader: `npm start` runs native con
 
 The experiment uses real Kokoro WAV responses, validates mono 24-kHz PCM16, strips WAV containers, and feeds one continuous FFmpeg MP3 encoder. Low input probing and output flushing are explicit: encoder defaults can otherwise delay output until more PCM arrives. Browser playback is a normal `<audio>` URL, with Media Session metadata and play/pause handlers. JavaScript polling only displays status; it does not produce or schedule audio.
 
+The results and polling references below describe the original Kokoro experiment. The current reader and diagnostic page use Pocket TTS and SSE status snapshots instead of recurring polling; native MP3 playback and the audio-consumer grace remain independent of status connections. See the [current architecture and SSE contract](../README.md#architecture) for implementation details. The historical phone results do not qualify the new provider or status transport on Android.
+
 ## Run on a trusted private network
 
 Requirements: Node/npm dependencies, FFmpeg with `libmp3lame`, and a reachable Kokoro `/tts` endpoint.
