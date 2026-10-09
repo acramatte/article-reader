@@ -2,8 +2,23 @@ import { synthesizeSpeech } from "./tts-client.mjs";
 
 const transportCodes = new Set(["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
 
+const engines = {
+  pocket: { name: "Pocket TTS", voices: [
+    { id: "jane", name: "Jane", group: "American English · Female" },
+    { id: "bill_boerst", name: "Bill Boerst", group: "American English · Male" },
+    { id: "estelle", name: "Estelle", group: "French · Female" },
+  ] },
+  kokoro: { name: "Kokoro", voices: [
+    { id: "af_heart", name: "Heart", group: "American English · Female" },
+    { id: "am_michael", name: "Michael", group: "American English · Male" },
+    { id: "ff_siwis", name: "Siwis", group: "French · Female" },
+  ] },
+};
+
 // One provider boundary for the legacy WAV API and continuous narration.
-export function speechProvider({ ttsUrl, ttsToken, synthesize = fetch }) {
+export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthesize = fetch }) {
+  if (!Object.hasOwn(engines, ttsEngine)) throw new Error("TTS_ENGINE must be pocket or kokoro.");
+  const config = { engine: ttsEngine, ...engines[ttsEngine] };
   const endpoint = new URL(ttsUrl);
   if (!["http:", "https:"].includes(endpoint.protocol)) throw new Error("TTS_URL must use HTTP or HTTPS.");
   const fetchWav = async (body, signal) => {
@@ -20,14 +35,14 @@ export function speechProvider({ ttsUrl, ttsToken, synthesize = fetch }) {
       await upstream.body?.cancel();
       return new Response(JSON.stringify(upstream.status === 503
         ? { code: "INFERENCE_UNAVAILABLE", error: "Speech engine is temporarily unavailable or starting up." }
-        : { error: `Kokoro returned HTTP ${upstream.status}.` }), {
+        : { error: `${config.name} returned HTTP ${upstream.status}.` }), {
         status: upstream.status === 503 ? 503 : 502,
         headers: { "Content-Type": "application/json", "Retry-After": upstream.headers.get("Retry-After") || "2" },
       });
     }
     if (!/^audio\/wav(?:;|$)/i.test(upstream.headers.get("content-type") || "")) {
       await upstream.body?.cancel();
-      throw new Error("Kokoro did not return WAV audio.");
+      throw new Error(`${config.name} did not return WAV audio.`);
     }
     const pieces = [];
     let size = 0;
@@ -44,6 +59,7 @@ export function speechProvider({ ttsUrl, ttsToken, synthesize = fetch }) {
     return new Response(Buffer.concat(pieces), { headers });
   };
   return {
+    config,
     fetchWav,
     synthesizeChunk: (body, signal, onWaiting) => synthesizeSpeech(body, signal, onWaiting, {
       fetchSpeech: (_path, request) => fetchWav(JSON.parse(request.body), request.signal),

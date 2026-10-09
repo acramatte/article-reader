@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 
-// Real Kokoro speech and real MP3 decoding. No synthesis mocks in this acceptance test.
+// Real Pocket TTS speech and real MP3 decoding. No synthesis mocks in this acceptance test.
 const text = [
   "This recording tests continuous streaming from the real speech engine. The first paragraph starts while the server is still preparing the following paragraphs. We should hear actual speech, not a synthetic test tone.",
   "The page will now be frozen deliberately through the browser debugging protocol. Generation must continue on the server, and the media player should advance without the page scheduling new audio chunks. This is not a physical Android test.",
@@ -56,7 +56,7 @@ test("completed narration survives reload and a new tab, resumes its saved posit
 });
 
 async function recoveryFixture(page, request, paceSeconds = 0) {
-  const response = await request.post("/api/streaming", { data: { text, voice: "af_heart", speed: 1, paceSeconds } });
+  const response = await request.post("/api/streaming", { data: { text, voice: "jane", speed: 1, paceSeconds } });
   expect(response.status()).toBe(201);
   const { id } = await response.json();
   if (!paceSeconds) await expect.poll(async () => (await request.get(`/api/streaming/${id}/status`).then(r => r.json())).state).toBe("ready");
@@ -213,7 +213,7 @@ test("real speech streams before completion and advances while page JavaScript i
   const ready = await request.get(`/api/streaming/${before.id}/status`).then(r => r.json());
   const recording = await request.get(`/api/streaming/${before.id}/audio`);
   expect(recording.headers()["content-type"]).toBe("audio/mpeg");
-  const path = testInfo.outputPath("real-kokoro-stream.mp3");
+  const path = testInfo.outputPath("real-pocket-tts-stream.mp3");
   await writeFile(path, await recording.body());
   const pcm = execFileSync("ffmpeg", ["-v", "error", "-i", path, "-f", "f32le", "-ac", "1", "pipe:1"], { maxBuffer: 20_000_000 });
   let sum = 0;

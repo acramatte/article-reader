@@ -8,7 +8,7 @@ export const deferred = () => {
   return { promise, resolve };
 };
 
-// SYNTHETIC/UI-only: real native media decoding, never Kokoro/provider acceptance.
+// SYNTHETIC/UI-only: real native media decoding, never Pocket TTS/provider acceptance.
 function syntheticWav(seconds) {
   const rate = 8000;
   const samples = Math.round(rate * seconds);

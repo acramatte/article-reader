@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { synthesizeSpeech, retryDelay } from "../tts-client.mjs";
 
-const body = { text: "Hello", voice: "af_heart", speed: 1 };
+const body = { text: "Hello", voice: "jane", speed: 1 };
 const unavailable = () => Response.json({ code: "INFERENCE_UNAVAILABLE" }, { status: 503 });
 const signal = () => new AbortController().signal;
 

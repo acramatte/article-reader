@@ -13,6 +13,7 @@ services:
       HOST: 0.0.0.0
       PORT: "3001"
       NODE_ENV: production
+      TTS_ENGINE: ${TTS_ENGINE:-pocket}
       TTS_URL: ${TTS_URL:?Set TTS_URL to the HF Protected HTTPS synthesis endpoint}
       STREAM_SPOOL_DIR: /spool
     read_only: true

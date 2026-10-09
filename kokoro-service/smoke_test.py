@@ -64,7 +64,7 @@ if __name__ == "__main__":
     assert importlib.metadata.version("torch").endswith("+cpu")
     assert not any(d.metadata["Name"].lower().startswith("nvidia-") for d in importlib.metadata.distributions())
     quick = os.environ.get("KOKORO_SMOKE_MODE") == "quick"
-    voices = ("af_heart",) if quick else ("af_heart", "af_nicole", "am_michael", "ff_siwis")
+    voices = ("af_heart", "am_michael", "ff_siwis") if quick else ("af_heart", "af_nicole", "am_michael", "ff_siwis")
     text = "Hello from Kokoro." if quick else TEXT
     measured = []
     for voice in voices:
@@ -100,9 +100,14 @@ if __name__ == "__main__":
     cgroup = Path("/sys/fs/cgroup/memory.peak")
     events = dict(line.split() for line in Path("/sys/fs/cgroup/memory.events").read_text().splitlines())
     assert int(events["oom"]) == 0 and int(events["oom_kill"]) == 0
-    swap_peak = int(Path("/sys/fs/cgroup/memory.swap.peak").read_text())
-    assert swap_peak == 0
+    swap_file = Path("/sys/fs/cgroup/memory.swap.peak")
+    swap_peak = int(swap_file.read_text()) if swap_file.exists() else None
+    if swap_peak is None:
+        assert int(Path("/sys/fs/cgroup/memory.swap.max").read_text()) == 0
+        assert int(Path("/sys/fs/cgroup/memory.swap.current").read_text()) == 0
+    else:
+        assert swap_peak == 0
     print(json.dumps({"voices": measured, "memory_peak_mib": int(cgroup.read_text()) / (1024 * 1024) if cgroup.exists() else None,
                       "swap_peak_bytes": swap_peak, "memory_events": events,
                       "mode": "quick" if quick else "full",
-                      "checks": "offline-network startup, short real WAV, input validation" if quick else "offline-network startup, real WAVs, all voices, speed boundaries, root route, input validation, concurrent 429, recovery"}, indent=2))
+                      "checks": "offline-network startup, short real WAVs for all reader voices, input validation" if quick else "offline-network startup, real WAVs, all voices, speed boundaries, root route, input validation, concurrent 429, recovery"}, indent=2))

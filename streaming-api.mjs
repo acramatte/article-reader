@@ -23,8 +23,7 @@ export function streamingLimits(options = {}, env = process.env) {
   }));
 }
 
-function validate(body, maxTextChars) {
-  const voices = new Set(["af_heart", "af_nicole", "am_michael", "ff_siwis"]);
+function validate(body, maxTextChars, voices) {
   if (typeof body?.text !== "string" || !body.text.trim() || body.text.length > maxTextChars ||
       !voices.has(body.voice) || typeof body.speed !== "number" || !Number.isFinite(body.speed) || body.speed < 0.5 || body.speed > 2 ||
       (body.paceSeconds !== undefined && (!Number.isInteger(body.paceSeconds) || body.paceSeconds < 0 || body.paceSeconds > 8))) {
@@ -51,7 +50,7 @@ export function createStreamingApi(options, readJson) {
     if (!url.pathname.startsWith("/api/streaming")) return false;
     if (request.method === "POST" && url.pathname === "/api/streaming") {
       const body = await readJson(request, { maxBytes: 6 * config.maxTextChars + metadataBodyBytes });
-      validate(body, config.maxTextChars);
+      validate(body, config.maxTextChars, options.voices);
       const session = await narrations.create(body);
       json(201, { id: session.id, audioUrl: `/api/streaming/${session.id}/audio` });
       return true;

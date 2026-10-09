@@ -35,7 +35,7 @@ async function streamingReader(t, options = {}) {
 
 test("normal reader exposes streaming content/audio/status/mark/stop and non-secret limits", async t => {
   const { base, server, post } = await streamingReader(t);
-  const body = { text: "An article paragraph.", voice: "am_michael", speed: 1.25, title: "Article", byline: "Author", sourceUrl: "https://example.com/story" };
+  const body = { text: "An article paragraph.", voice: "bill_boerst", speed: 1.25, title: "Article", byline: "Author", sourceUrl: "https://example.com/story" };
   const created = await post("/api/streaming", body);
   assert.equal(created.status, 201);
   const { id, audioUrl } = await created.json();
@@ -64,24 +64,24 @@ test("full-length Unicode/escaped JSON fits streaming body bounds; legacy byte b
     await delay(10000, undefined, { signal }); return syntheticWav();
   } });
   const text = "漢".repeat(100000); // 300 kB UTF-8, above legacy body limit; synthesis immediately cancelled.
-  let response = await post("/api/streaming", { text, voice: "af_heart", speed: 1 });
+  let response = await post("/api/streaming", { text, voice: "jane", speed: 1 });
   assert.equal(response.status, 201);
   let { id } = await response.json();
   assert.equal((await (await fetch(base + `/api/streaming/${id}/content`)).json()).text, text);
   await post(`/api/streaming/${id}/stop`, {});
-  const escaped = '{"text":"' + '\\u6f22'.repeat(100000) + '","voice":"af_heart","speed":1}';
+  const escaped = '{"text":"' + '\\u6f22'.repeat(100000) + '","voice":"jane","speed":1}';
   response = await fetch(base + "/api/streaming", { method: "POST", headers: { "Content-Type": "application/json" }, body: escaped });
   assert.equal(response.status, 201);
   ({ id } = await response.json());
   await post(`/api/streaming/${id}/stop`, {});
-  response = await post("/api/streaming", { text: "x".repeat(700000), voice: "af_heart", speed: 1 });
+  response = await post("/api/streaming", { text: "x".repeat(700000), voice: "jane", speed: 1 });
   assert.equal(response.status, 400); assert.match((await response.json()).error, /body is too large/);
   response = await post("/api/article", { url: "https://example.com", padding: "x".repeat(150000) });
   assert.equal(response.status, 400); assert.match((await response.json()).error, /body is too large/);
   assert.equal(server.narrations.sessions.size, 2);
   const limited = await streamingReader(t, { maxTextChars: 7000 });
-  assert.equal((await limited.post("/api/streaming", { text: "x".repeat(7001), voice: "af_heart", speed: 1 })).status, 400);
-  assert.equal((await limited.post("/api/streaming", { text: "x".repeat(7000), voice: "af_heart", speed: 1 })).status, 201);
+  assert.equal((await limited.post("/api/streaming", { text: "x".repeat(7001), voice: "jane", speed: 1 })).status, 400);
+  assert.equal((await limited.post("/api/streaming", { text: "x".repeat(7000), voice: "jane", speed: 1 })).status, 201);
 });
 
 test("metadata and credential-free HTTP(S) source URLs are validated before inference", async t => {
@@ -90,7 +90,7 @@ test("metadata and credential-free HTTP(S) source URLs are validated before infe
   for (const metadata of [{ title: "x".repeat(201) }, { title: null }, { byline: "x".repeat(501) }, { byline: [] },
     { sourceUrl: "x".repeat(2049) }, { sourceUrl: "not a URL" }, { sourceUrl: "file:///story" },
     { sourceUrl: "https://user:pass@example.com/" }, { sourceUrl: 123 }]) {
-    assert.equal((await post("/api/streaming", { text: "Hello", voice: "af_heart", speed: 1, ...metadata })).status, 400);
+    assert.equal((await post("/api/streaming", { text: "Hello", voice: "jane", speed: 1, ...metadata })).status, 400);
   }
   assert.equal(calls, 0);
 });
@@ -101,7 +101,7 @@ test("transport failure exposes a bounded connection code and does not retry amb
     calls++;
     throw new TypeError("fetch failed", { cause: { code: "UND_ERR_SOCKET" } });
   } });
-  const response = await post("/api/streaming", { text: "Connection failure.", voice: "af_heart", speed: 1 });
+  const response = await post("/api/streaming", { text: "Connection failure.", voice: "jane", speed: 1 });
   const { id } = await response.json();
   await server.narrations.sessions.get(id).done;
   const status = await (await fetch(`${base}/api/streaming/${id}/status`)).json();
@@ -112,7 +112,7 @@ test("transport failure exposes a bounded connection code and does not retry amb
 test("escaped maximum metadata fits the body bound alongside maximum narration text", async t => {
   const { base, server } = await streamingReader(t, { maxTextChars: 20 });
   const prefix = "https://example.com/";
-  const content = { text: "漢".repeat(20), voice: "af_heart", speed: 1,
+  const content = { text: "漢".repeat(20), voice: "jane", speed: 1,
     title: "漢".repeat(200), byline: "漢".repeat(500), sourceUrl: prefix + "漢".repeat(2048 - prefix.length) };
   const body = JSON.stringify(content).replaceAll("漢", "\\u6f22");
   const response = await fetch(base + "/api/streaming", { method: "POST", headers: { "Content-Type": "application/json" }, body });
@@ -136,14 +136,14 @@ test("normal streaming shares the server-side provider and rejects non-WAV", asy
   let request;
   const { base, server, post } = await streamingReader(t, { synthesizeChunk: undefined, ttsToken: "test-only-token",
     synthesize: async (_endpoint, options) => { request = options; return new Response(syntheticWav(), { headers: { "Content-Type": "audio/wav" } }); } });
-  const { id } = await (await post("/api/streaming", { text: "Hello", voice: "af_heart", speed: 1 })).json();
+  const { id } = await (await post("/api/streaming", { text: "Hello", voice: "jane", speed: 1 })).json();
   await server.narrations.sessions.get(id).done;
   assert.equal(request.headers.Authorization, "Bearer test-only-token"); assert.equal(request.redirect, "error");
   assert.equal((await (await fetch(base + `/api/streaming/${id}/status`)).json()).state, "ready");
   const invalid = await streamingReader(t, { synthesizeChunk: undefined, synthesize: async () => new Response("not audio") });
-  const failure = await (await invalid.post("/api/streaming", { text: "Hello", voice: "af_heart", speed: 1 })).json();
+  const failure = await (await invalid.post("/api/streaming", { text: "Hello", voice: "jane", speed: 1 })).json();
   await invalid.server.narrations.sessions.get(failure.id).done;
-  assert.match(invalid.server.narrations.sessions.get(failure.id).error, /Kokoro did not return WAV/);
+  assert.match(invalid.server.narrations.sessions.get(failure.id).error, /Pocket TTS did not return WAV/);
 });
 
 test("API extracts article and proxies WAV and metrics, sending token only upstream", async (t) => {
@@ -155,24 +155,39 @@ test("API extracts article and proxies WAV and metrics, sending token only upstr
   const article = await post("/api/article", { url: "https://example.com/story" });
   assert.equal(article.status, 200);
   assert.equal((await article.json()).title, "A garden for everyone");
-  const response = await post("/api/tts", { text: "Hello", voice: "af_heart", speed: 1 });
+  const response = await post("/api/tts", { text: "Hello", voice: "jane", speed: 1 });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("X-RTF"), "0.15");
   assert.equal(response.headers.get("Authorization"), null);
   assert.equal(upstream.request.headers.Authorization, "Bearer test-only-token");
-  assert.deepEqual(JSON.parse(upstream.request.body), { text: "Hello", voice: "af_heart", speed: 1 });
+  assert.deepEqual(JSON.parse(upstream.request.body), { text: "Hello", voice: "jane", speed: 1 });
   assert.equal((await response.arrayBuffer()).byteLength, 4);
 });
 
-test("both speech APIs accept the current voices, preserve selection and reject Bella", async t => {
+for (const [ttsEngine, name, catalog, foreignVoices] of [
+  ["pocket", "Pocket TTS", [
+    { id: "jane", name: "Jane", group: "American English · Female" },
+    { id: "bill_boerst", name: "Bill Boerst", group: "American English · Male" },
+    { id: "estelle", name: "Estelle", group: "French · Female" },
+  ], ["af_heart", "am_michael", "ff_siwis"]],
+  ["kokoro", "Kokoro", [
+    { id: "af_heart", name: "Heart", group: "American English · Female" },
+    { id: "am_michael", name: "Michael", group: "American English · Male" },
+    { id: "ff_siwis", name: "Siwis", group: "French · Female" },
+  ], ["jane", "bill_boerst", "estelle"]],
+]) test(`both speech APIs use the ${ttsEngine} catalog and reject foreign voices`, async t => {
   const seen = [];
-  const { base, server, post } = await streamingReader(t, { synthesizeChunk: undefined,
+  const { base, server, post } = await streamingReader(t, { ttsEngine, synthesizeChunk: undefined,
+    ttsUrl: "https://tts.example.test/private/tts", ttsToken: "test-only-token",
     synthesize: async (_url, request) => {
       seen.push(JSON.parse(request.body));
       return new Response(syntheticWav(), { headers: { "Content-Type": "audio/wav" } });
     } });
-  for (const voice of ["af_heart", "af_nicole", "am_michael", "ff_siwis"]) {
-    const body = { text: voice === "ff_siwis" ? "Bonjour, lecture en français." : "Hello, reading in English.", voice, speed: 1 };
+  const config = await (await fetch(base + "/api/config")).json();
+  assert.deepEqual(config.tts, { engine: ttsEngine, name, voices: catalog });
+  assert.doesNotMatch(JSON.stringify(config), /tts\.example\.test|test-only-token|ttsUrl|ttsToken/);
+  for (const { id: voice, group } of catalog) {
+    const body = { text: group.startsWith("French") ? "Bonjour, lecture en français." : "Hello, reading in English.", voice, speed: 1 };
     assert.equal((await post("/api/tts", body)).status, 200);
     assert.deepEqual(seen.at(-1), body);
     const response = await post("/api/streaming", body);
@@ -185,14 +200,58 @@ test("both speech APIs accept the current voices, preserve selection and reject 
   }
   const count = seen.length;
   for (const path of ["/api/tts", "/api/streaming"]) {
-    assert.equal((await post(path, { text: "Hello", voice: "af_bella", speed: 1 })).status, 400);
+    for (const voice of [...foreignVoices, "af_nicole", "af_bella"]) {
+      const response = await post(path, { text: "Hello", voice, speed: 1 });
+      assert.equal(response.status, 400, `${path} rejects unsupported voice ${voice}`);
+      assert.match((await response.json()).error, /supported voice/);
+    }
   }
   assert.equal(seen.length, count);
+  assert.equal(server.narrations.sessions.size, 3, "rejected streaming requests create no sessions");
+});
+
+test("unknown engines fail at startup instead of falling back to Pocket TTS", () => {
+  for (const ttsEngine of ["", "unknown", "Kokoro", "toString"]) {
+    assert.throws(() => createApp({ ttsEngine }), /TTS_ENGINE must be pocket or kokoro/);
+  }
+});
+
+test("an unset or empty TTS_ENGINE environment variable selects Pocket TTS", async t => {
+  const previous = process.env.TTS_ENGINE;
+  t.after(() => { if (previous === undefined) delete process.env.TTS_ENGINE; else process.env.TTS_ENGINE = previous; });
+  for (const value of [undefined, ""]) {
+    if (value === undefined) delete process.env.TTS_ENGINE; else process.env.TTS_ENGINE = value;
+    const server = createApp().listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const config = await (await fetch(`http://127.0.0.1:${server.address().port}/api/config`)).json();
+    server.closeAllConnections(); server.close();
+    assert.equal(config.tts.engine, "pocket");
+  }
+});
+
+test("raw WAV API rejects non-1 speeds before synthesis and directs callers to streaming", async t => {
+  let calls = 0;
+  const post = await app(t, { synthesize: async () => {
+    calls++;
+    return new Response(syntheticWav(), { headers: { "Content-Type": "audio/wav" } });
+  } });
+  for (const speed of [0.5, 0.75, 1.25, 1.5, 2, 0.99, 1.01, "1", null, 3]) {
+    const response = await post("/api/tts", { text: "Hello", voice: "jane", speed });
+    assert.equal(response.status, 400, `raw speed ${speed} is rejected`);
+    const { error } = await response.json();
+    assert.match(error, /speed 1/);
+    assert.match(error, /\/api\/streaming/);
+  }
+  const missing = await post("/api/tts", { text: "Hello", voice: "jane" });
+  assert.equal(missing.status, 400);
+  assert.equal(calls, 0, "no rejected speed reaches the speech engine");
+  assert.equal((await post("/api/tts", { text: "Hello", voice: "jane", speed: 1 })).status, 200);
+  assert.equal(calls, 1);
 });
 
 test("API rejects invalid requests and cross-origin browser calls", async (t) => {
   const post = await app(t);
-  for (const body of [null, {}, { text: "", voice: "af_heart", speed: 1 }, { text: "x".repeat(1001), voice: "af_heart", speed: 1 }, { text: "Hi", voice: "unknown", speed: 1 }, { text: "Hi", voice: "af_heart", speed: 3 }]) assert.equal((await post("/api/tts", body)).status, 400);
+  for (const body of [null, {}, { text: "", voice: "jane", speed: 1 }, { text: "x".repeat(1001), voice: "jane", speed: 1 }, { text: "Hi", voice: "unknown", speed: 1 }, { text: "Hi", voice: "jane", speed: 3 }]) assert.equal((await post("/api/tts", body)).status, 400);
   assert.equal((await post("/api/article", {})).status, 400);
   assert.equal((await post("/api/article", { url: "http://localhost" })).status, 400);
   assert.equal((await post("/api/article", {}, { Origin: "https://evil.example" })).status, 403);
@@ -203,7 +262,7 @@ test("upstream 503 exposes only a retryable code and Retry-After, not provider d
     const post = await app(t, { synthesize: async () => new Response("provider-internal-details", {
       status: 503, headers: retryAfter ? { "Retry-After": retryAfter } : {},
     }) });
-    const response = await post("/api/tts", { text: "Hello", voice: "af_heart", speed: 1 });
+    const response = await post("/api/tts", { text: "Hello", voice: "jane", speed: 1 });
     assert.equal(response.status, 503);
     assert.equal(response.headers.get("Retry-After"), retryAfter || "2");
     const problem = await response.json();
@@ -215,17 +274,19 @@ test("upstream 503 exposes only a retryable code and Retry-After, not provider d
 test("authentication and busy errors are not classified as startup", async (t) => {
   for (const status of [401, 403, 429]) {
     const post = await app(t, { synthesize: async () => new Response("failed", { status }) });
-    const response = await post("/api/tts", { text: "Hello", voice: "af_heart", speed: 1 });
+    const response = await post("/api/tts", { text: "Hello", voice: "jane", speed: 1 });
     assert.equal(response.status, 502);
     assert.equal((await response.json()).code, undefined);
   }
 });
 
 test("upstream errors and non-WAV responses become actionable API errors", async (t) => {
-  for (const response of [new Response("failed", { status: 500 }), new Response("not audio")]) {
-    const post = await app(t, { synthesize: async () => response });
-    const result = await post("/api/tts", { text: "Hello", voice: "af_heart", speed: 1 });
-    assert.equal(result.status, 502);
-    assert.match((await result.json()).error, /Kokoro/);
+  for (const [ttsEngine, voice, name] of [["pocket", "jane", "Pocket TTS"], ["kokoro", "af_heart", "Kokoro"]]) {
+    for (const response of [new Response("failed", { status: 500 }), new Response("not audio")]) {
+      const post = await app(t, { ttsEngine, synthesize: async () => response });
+      const result = await post("/api/tts", { text: "Hello", voice, speed: 1 });
+      assert.equal(result.status, 502);
+      assert.ok((await result.json()).error.startsWith(name));
+    }
   }
 });

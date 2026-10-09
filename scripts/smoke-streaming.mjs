@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-// Requires a real, reachable Kokoro service. No fixture synthesis in this packaging test.
+// Requires a real, reachable Pocket TTS service. No fixture synthesis in this packaging test.
 const [image = "article-reader:streaming-spike", ttsUrl, network] = process.argv.slice(2);
 if (!ttsUrl || !network) throw new Error("Usage: node scripts/smoke-streaming.mjs IMAGE TTS_URL DOCKER_NETWORK");
 const docker = (...args) => execFileSync("docker", args, { encoding: "utf8" }).trim();
@@ -36,7 +36,7 @@ try {
   }
   const post = (path, body) => fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const started = performance.now();
-  const created = await post("/api/streaming", { voice: "af_heart", speed: 1, paceSeconds: 5,
+  const created = await post("/api/streaming", { voice: "jane", speed: 1, paceSeconds: 5,
     text: "This is real speech from the production inference image, encoded by the reader container. The first paragraph should arrive before the whole recording is generated.\n\nThe second paragraph tests continuous encoding of separate speech chunks. It should follow the first without a second media player or JavaScript audio scheduling." });
   assert.equal(created.status, 201);
   const session = await created.json();

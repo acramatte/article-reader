@@ -1,5 +1,6 @@
 import { StreamingPlayer } from "./stream-player.mjs";
 import { PlaybackBookmark } from "./public/streaming-state.js";
+import { loadTtsSettings } from "./public/tts-settings.js";
 
 // Bundle the same validated bookmark used by the diagnostic player.
 const bookmarkReady = Promise.resolve(new PlaybackBookmark());
@@ -10,6 +11,7 @@ const status = $("#status");
 const statusText = $("#status-text");
 let narrator = null;
 let active = false;
+let settingsLoaded = false;
 let source = "url";
 let hasReadText = false;
 let sessionHasText = false;
@@ -18,8 +20,10 @@ let pauseAnimations = [];
 function renderSource() {
   // Keep the same URL input mounted and focusable throughout the reveal.
   if ($("#url").readOnly !== active) $("#url").readOnly = active;
-  setDisabled($("#read-url"), active);
+  setDisabled($("#read-url"), active || !settingsLoaded);
   setDisabled($("#paste-fallback"), active);
+  for (const id of ["#voice", "#speed"]) setDisabled($(id), active || !settingsLoaded);
+  setDisabled($("#read-start"), active || !settingsLoaded || (source === "url" && !sessionHasText));
   setText($("#read-start"), hasReadText || source === "url" ? "Read again" : "Read text");
 }
 
@@ -35,7 +39,6 @@ function openFallback() {
   revealWorkspace();
   $("#playback").hidden = false;
   $("#listen-title").hidden = false;
-  setDisabled($("#read-start"), false);
   $("#editor").open = true;
   $("#paste-fallback").setAttribute("aria-expanded", "true");
   if ($("#article-panel").hidden) setText($("#editor-summary"), "Paste article text");
@@ -91,8 +94,7 @@ function render(update) {
     if ($(id).hidden === hasPlayback) $(id).hidden = !hasPlayback;
   }
   if (!hasPlayback) $("#diagnostics").hidden = true;
-  for (const selector of ["#voice", "#speed", "#text"]) setDisabled($(selector), active);
-  setDisabled($("#read-start"), active || (source === "url" && !sessionHasText));
+  setDisabled(textArea, active);
   const extractionError = update.state === "error" && source === "url" && !sessionHasText && !update.recovered;
   if ($("#fallback-advice").hidden !== !extractionError) $("#fallback-advice").hidden = !extractionError;
   if ($("#paste-fallback").classList.contains("recommended") !== extractionError) $("#paste-fallback").classList.toggle("recommended", extractionError);
@@ -130,7 +132,7 @@ function render(update) {
 }
 
 function read(fromUrl) {
-  if (active) return;
+  if (active || !settingsLoaded) return;
   const input = fromUrl ? $("#url").value.trim() : textArea.value.trim();
   if (!input) { showFeedback(fromUrl ? "Enter a webpage URL first." : "Enter some text first."); return; }
   if (!$("#narration-audio").canPlayType("audio/mpeg")) { showFeedback("This browser does not support MP3 audio playback."); return; }
@@ -204,7 +206,7 @@ function updateSettingsSummary() {
   $("#voice-settings summary").setAttribute("aria-label", `Voice and speed: ${selection}`);
 }
 for (const id of ["#voice", "#speed"]) $(id).addEventListener("change", updateSettingsSummary);
-updateSettingsSummary();
+renderSource();
 $("#pause").addEventListener("click", () => void narrator?.togglePause());
 $("#stop").addEventListener("click", async () => {
   await narrator?.shutdown();
@@ -242,6 +244,18 @@ const recovery = new StreamingPlayer({
   },
 });
 narrator = recovery;
-void recovery.restore().then(restored => {
+void loadTtsSettings($("#voice")).then(async () => {
+  settingsLoaded = true;
+  updateSettingsSummary();
+  renderSource();
+  // Recovery must set the saved voice only after its option exists.
+  const restored = await recovery.restore();
   if (!restored && narrator === recovery && recovery.bookmark.warning) showFeedback(recovery.bookmark.warning);
-}).catch(error => { if (narrator === recovery) showFeedback(error.message); });
+}).catch(error => {
+  if (narrator !== recovery) return;
+  if (!settingsLoaded) {
+    setText($("#settings-summary"), "Voices unavailable");
+    $("#voice-settings summary").setAttribute("aria-label", "Voice and speed: voices unavailable");
+  }
+  showFeedback(`${error.message} Reload to retry.`);
+});

@@ -6,7 +6,6 @@ import { fetchArticleHtml, extractArticle } from "./article.mjs";
 import { speechProvider } from "./tts-provider.mjs";
 import { createStreamingApi } from "./streaming-api.mjs";
 
-const voices = new Set(["af_heart", "af_nicole", "am_michael", "ff_siwis"]);
 export async function readJson(request, { maxBytes = 150_000 } = {}) {
   let size = 0;
   const pieces = [];
@@ -21,6 +20,7 @@ export async function readJson(request, { maxBytes = 150_000 } = {}) {
 }
 
 export function createApp({
+  ttsEngine = process.env.TTS_ENGINE || "pocket",
   ttsUrl = process.env.TTS_URL || "http://127.0.0.1:8000/tts",
   ttsToken = process.env.TTS_TOKEN,
   fetchPage = fetchArticleHtml,
@@ -31,8 +31,9 @@ export function createApp({
   experiment = false,
   ...streamingOptions
 } = {}) {
-  const provider = speechProvider({ ttsUrl, ttsToken, synthesize });
-  const streaming = createStreamingApi({ ...streamingOptions,
+  const provider = speechProvider({ ttsEngine, ttsUrl, ttsToken, synthesize });
+  const voices = new Set(provider.config.voices.map(voice => voice.id));
+  const streaming = createStreamingApi({ ...streamingOptions, voices,
     synthesizeChunk: synthesizeChunk || provider.synthesizeChunk }, readJson);
   const server = http.createServer(async (request, response) => {
     const controller = new AbortController();
@@ -49,7 +50,7 @@ export function createApp({
         response.writeHead(302, { Location: rootRedirect, "Cache-Control": "no-store" });
         return response.end();
       }
-      if (["/streaming.html", "/streaming.js", "/streaming-state.js"].includes(url.pathname)) response.setHeader("Cache-Control", "no-store");
+      if (["/streaming.html", "/streaming.js", "/streaming-state.js", "/tts-settings.js"].includes(url.pathname)) response.setHeader("Cache-Control", "no-store");
       // No CORS access; recording reads are protected too, not just state-changing POSTs.
       if (request.method === "POST" || url.pathname.startsWith("/api/streaming")) {
         if (request.method === "POST" && !/^application\/json(?:;|$)/i.test(request.headers["content-type"] || "")) return json(415, { error: "JSON content type required." });
@@ -59,7 +60,7 @@ export function createApp({
         }
       }
       if (await streaming.handle(url, request, response, json)) return;
-      if (request.method === "GET" && url.pathname === "/api/config") return json(200, streaming.config);
+      if (request.method === "GET" && url.pathname === "/api/config") return json(200, { ...streaming.config, tts: provider.config });
       if (request.method === "POST" && url.pathname === "/api/article") {
         const body = await readJson(request);
         if (typeof body?.url !== "string") return json(400, { error: "A webpage URL is required." });
@@ -69,8 +70,8 @@ export function createApp({
       if (request.method === "POST" && url.pathname === "/api/tts") {
         const body = await readJson(request);
         if (typeof body?.text !== "string" || !body.text.trim() || body.text.length > 1_000 ||
-            !voices.has(body.voice) || typeof body.speed !== "number" || !Number.isFinite(body.speed) || body.speed < 0.5 || body.speed > 2) {
-          return json(400, { error: "TTS requires 1–1,000 characters, a supported voice, and speed 0.5–2." });
+            !voices.has(body.voice) || body.speed !== 1) {
+          return json(400, { error: "Raw WAV requires 1–1,000 characters, a supported voice, and speed 1. Use /api/streaming for adjusted speed." });
         }
         const upstream = await provider.fetchWav({ text: body.text, voice: body.voice, speed: body.speed },
           AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]));
