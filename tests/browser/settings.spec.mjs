@@ -16,9 +16,9 @@ for (const width of [1280, 390, 320]) {
     await expect(page.locator("#url")).toHaveAttribute("placeholder", width <= 520 ? "Paste a link…" : "Paste an article link…");
     const summary = page.locator("#voice-settings summary");
     await expect(page.locator("#listening-card")).toBeHidden();
-    await expect(summary).toHaveText("Heart · 1×");
+    await expect(summary).toHaveText("Jane · 1×");
     await expect(page.locator("#voice")).toBeHidden();
-    await expect(summary).toHaveAccessibleName("Voice and speed: Heart · 1×");
+    await expect(summary).toHaveAccessibleName("Voice and speed: Jane · 1×");
     await expect(page.locator("#paste-fallback")).toHaveText("Paste text instead");
     await expect(page.locator("#url-hint")).toHaveCount(0);
     const input = await page.locator("#url").boundingBox();
@@ -44,20 +44,20 @@ for (const width of [1280, 390, 320]) {
     const form = await page.locator("#url-form").boundingBox();
     expect(panel.y).toBeGreaterThanOrEqual(trigger.y + trigger.height);
     expect(panel.width).toBeCloseTo(form.width, 0);
-    await page.locator("#voice").selectOption("af_nicole");
+    await page.locator("#voice").selectOption("bill_boerst");
     await page.keyboard.press("Tab");
     await expect(page.locator("#speed")).toBeFocused();
     await page.locator("#speed").selectOption("1.5");
-    await expect(summary).toHaveText("Nicole · 1.5×");
-    await expect(summary).toHaveAccessibleName("Voice and speed: Nicole · 1.5×");
+    await expect(summary).toHaveText("Bill Boerst · 1.5×");
+    await expect(summary).toHaveAccessibleName("Voice and speed: Bill Boerst · 1.5×");
     await expect(page.locator("#listening-card")).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: test.info().outputPath(`settings-expanded-${width}.png`), fullPage: true });
     await summary.focus();
     await page.keyboard.press("Space");
     await expect(page.locator("#voice")).toBeHidden();
-    await expect(summary).toHaveText("Nicole · 1.5×");
-    await expect(summary).toHaveAccessibleName("Voice and speed: Nicole · 1.5×");
+    await expect(summary).toHaveText("Bill Boerst · 1.5×");
+    await expect(summary).toHaveAccessibleName("Voice and speed: Bill Boerst · 1.5×");
     await page.screenshot({ path: test.info().outputPath(`settings-collapsed-${width}.png`), fullPage: true });
     await page.locator("#url").fill("https://example.com/article");
     await page.locator("#read-url").click();
@@ -65,9 +65,9 @@ for (const width of [1280, 390, 320]) {
     await expect(page.locator("#listening-card")).toBeVisible();
     await expect(page.locator("#read-start")).toBeEnabled();
     await expect(page.locator("#fallback-advice")).toBeHidden();
-    await expect(summary).toHaveText("Nicole · 1.5×");
-    await expect(summary).toHaveAccessibleName("Voice and speed: Nicole · 1.5×");
-    expect(speech).toMatchObject({ voice: "af_nicole", speed: 1.5 });
+    await expect(summary).toHaveText("Bill Boerst · 1.5×");
+    await expect(summary).toHaveAccessibleName("Voice and speed: Bill Boerst · 1.5×");
+    expect(speech).toMatchObject({ voice: "bill_boerst", speed: 1.5 });
   });
 }
 

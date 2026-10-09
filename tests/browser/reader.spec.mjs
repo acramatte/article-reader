@@ -4,7 +4,7 @@ import { nativeTime, bookmark, BOOKMARK_KEY } from "./narration-fixture.mjs";
 
 // Real end-to-end coverage: no synthetic media or /api/streaming routes here.
 // Run the backend with TTS_URL=http://127.0.0.1:8027/tts.
-test("real public URL → Readability → Kokoro → native continuous MP3 playback", async ({ page, request }) => {
+test("real public URL → Readability → Pocket TTS → native continuous MP3 playback", async ({ page, request }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   // A regression to browser-owned Web Audio must fail even if audio is audible.
@@ -92,7 +92,7 @@ test("default reader reload and a reopened tab restore the same real recording; 
   });
   await page.goto("/");
   await page.locator("#voice-settings summary").click();
-  await page.locator("#voice").selectOption("am_michael");
+  await page.locator("#voice").selectOption("bill_boerst");
   await page.locator("#speed").selectOption("1.2");
   await page.locator("#url").fill(article.url);
   await page.locator("#read-url").click();
@@ -112,9 +112,9 @@ test("default reader reload and a reopened tab restore the same real recording; 
   await expect(page.locator("#article-body")).toHaveText(article.text);
   await expect(page.locator("#byline")).toHaveText(article.byline);
   await expect(page.locator("#url")).toHaveValue(article.url);
-  await expect(page.locator("#voice")).toHaveValue("am_michael");
+  await expect(page.locator("#voice")).toHaveValue("bill_boerst");
   await expect(page.locator("#speed")).toHaveValue("1.2");
-  await expect(page.locator("#settings-summary")).toHaveText("Michael · 1.2×");
+  await expect(page.locator("#settings-summary")).toHaveText("Bill Boerst · 1.2×");
   expect((await bookmark(page)).id).toBe(saved.id);
   expect(creations).toHaveLength(1);
   expect(extractions).toBe(1);
@@ -158,9 +158,9 @@ test("private URL is blocked and extraction failure can recover with pasted text
   await expect(page.locator("#read-url")).toBeEnabled();
   await expect(page.locator("#fallback-advice")).toBeVisible();
   await expect(page.locator("#article-panel")).toBeHidden();
-  await page.route("**/api/streaming", (route) => route.fulfill({ status: 502, json: { error: "Kokoro is unavailable." } }));
+  await page.route("**/api/streaming", (route) => route.fulfill({ status: 502, json: { error: "Pocket TTS is unavailable." } }));
   await page.locator("#paste-fallback").click();
   await page.getByLabel("Extracted or pasted text").fill("An article can still be pasted here after a failed extraction.");
   await page.locator("#read-start").click();
-  await expect(page.locator("#status")).toContainText("Kokoro is unavailable.");
+  await expect(page.locator("#status")).toContainText("Pocket TTS is unavailable.");
 });

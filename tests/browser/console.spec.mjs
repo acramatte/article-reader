@@ -5,7 +5,7 @@ const articleText = "Listening should be simple. All the controls belong togethe
 test("URL auto-start, pause/resume, Stop → Read again generates the editor text without refetching", async ({ page }) => {
   let extractions = 0;
   const requests = [];
-  // Extraction fixture only: speech still uses the actual backend and Kokoro.
+  // Extraction fixture only: speech still uses the actual backend and Pocket TTS.
   await page.route("**/api/article", (route) => {
     extractions++;
     return route.fulfill({ json: { title: "A simpler listening space", byline: "Reader fixture", url: "https://example.com/article", text: articleText } });
@@ -71,7 +71,7 @@ test("URL-first landing, fallback and compact settings are keyboard reachable at
     await expect(page.locator("#article-panel")).toBeHidden();
     await expect(page.locator("#listening-card")).toBeHidden();
     await expect(page.getByText("Ready when you are.", { exact: true })).toHaveCount(0);
-    await expect(page.locator("#voice-settings summary")).toHaveText("Heart · 1×");
+    await expect(page.locator("#voice-settings summary")).toHaveText("Jane · 1×");
     await expect(page.locator("#playback")).toBeHidden();
     await expect(page.locator("#diagnostics")).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -92,9 +92,9 @@ test("URL-first landing, fallback and compact settings are keyboard reachable at
     await page.keyboard.press("Enter");
     await page.keyboard.press("Tab");
     await expect(page.locator("#voice")).toBeFocused();
-    await page.locator("#voice").selectOption("am_michael");
+    await page.locator("#voice").selectOption("bill_boerst");
     await page.locator("#speed").selectOption("1.2");
-    await expect(page.locator("#settings-summary")).toHaveText("Michael · 1.2×");
+    await expect(page.locator("#settings-summary")).toHaveText("Bill Boerst · 1.2×");
     await page.locator("#text").fill("Pasted text is a fallback, not an extracted article.");
     await expect(page.locator("#read-start")).toHaveText("Read text");
     await expect(page.locator("#article-panel")).toBeHidden();

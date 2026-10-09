@@ -1,4 +1,5 @@
 import { PlaybackBookmark } from "./streaming-state.js";
+import { loadTtsSettings } from "./tts-settings.js";
 
 const $ = selector => document.querySelector(selector);
 const audio = $("#audio");
@@ -6,9 +7,10 @@ let id = null;
 let snapshot = null;
 let poll = null;
 let starting = false;
+let settingsLoaded = false;
 let startedAt = 0;
 let firstPlaybackSeconds = null;
-let message = "Ready to test.";
+let message = "Loading voices…";
 let extraction = null;
 let requestController = null;
 let pendingCreation = null;
@@ -88,7 +90,8 @@ async function post(path, body, signal) {
 function render() {
   text("#status", message);
   const active = starting || stopping || (id && snapshot?.state !== "stopped" && snapshot?.state !== "error");
-  $("#start").disabled = Boolean(active);
+  $("#start").disabled = Boolean(active) || !settingsLoaded;
+  $("#voice").disabled = !settingsLoaded;
   $("#stop").disabled = !active || stopping;
   $("#mark").disabled = !id || audio.paused || snapshot?.state === "stopped" || snapshot?.state === "error";
   $("#refresh").disabled = !id;
@@ -134,7 +137,7 @@ async function refresh() {
 
 function mediaSession(title) {
   if (!("mediaSession" in navigator)) return;
-  navigator.mediaSession.metadata = new MediaMetadata({ title, artist: "Kokoro Article Reader" });
+  navigator.mediaSession.metadata = new MediaMetadata({ title, artist: "Article Reader" });
   for (const [action, handler] of [["play", () => { if (!restoring && !stopping) void audio.play().catch(playError); }], ["pause", () => audio.pause()]]) {
     try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* Browser-dependent actions. */ }
   }
@@ -149,7 +152,7 @@ function playError(error) {
 
 $("#form").addEventListener("submit", async event => {
   event.preventDefault();
-  if (starting || (id && !["stopped", "error"].includes(snapshot?.state))) return;
+  if (!settingsLoaded || starting || (id && !["stopped", "error"].includes(snapshot?.state))) return;
   revision++;
   clearInterval(poll);
   bookmark.clear();
@@ -275,13 +278,18 @@ window.addEventListener("pageshow", event => { if (event.persisted) void refresh
 window.streamingProbe = () => ({ id, snapshot, firstPlaybackSeconds, currentTime: audio.currentTime,
   paused: audio.paused, readyState: audio.readyState, pageHides, failures,
   recovered: Boolean(recovery), restoring, restoredPositionSeconds, wasDiscarded, navigationType });
-recovery = bookmark.load();
-if (recovery) {
-  id = recovery.id;
-  narrationTitle = recovery.title;
-  restoring = true;
-  message = "Checking saved recording…";
-  poll = setInterval(refresh, 1000);
-  void refresh();
-} else if (bookmark.warning) message = bookmark.warning;
+void loadTtsSettings($("#voice")).then(tts => {
+  settingsLoaded = true;
+  text("#tts-engine", tts.name);
+  recovery = bookmark.load();
+  if (recovery) {
+    id = recovery.id;
+    narrationTitle = recovery.title;
+    restoring = true;
+    message = "Checking saved recording…";
+    poll = setInterval(refresh, 1000);
+    void refresh();
+  } else message = bookmark.warning || "Ready to test.";
+  render();
+}).catch(error => { message = `${error.message} Reload to retry.`; render(); });
 render();

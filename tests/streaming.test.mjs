@@ -37,7 +37,7 @@ async function app(t, options = {}) {
   const post = (path, body, headers = {}) => fetch(base + path, { method: "POST",
     headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
   const create = async (extra = {}) => {
-    const response = await post("/api/streaming", { text: "One paragraph.\n\nAnother paragraph.", voice: "af_heart", speed: 1, ...extra });
+    const response = await post("/api/streaming", { text: "One paragraph.\n\nAnother paragraph.", voice: "jane", speed: 1, ...extra });
     assert.equal(response.status, 201);
     return response.json();
   };
@@ -54,6 +54,34 @@ async function until(fn, accept, timeout = 5000) {
   assert.fail("Streaming state did not reach expected condition");
 }
 
+// Decode with real FFmpeg into the same 24 kHz mono PCM16 layout as the source fixture.
+async function decodeMp3(bytes) {
+  const decoder = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "mp3", "-i", "pipe:0",
+    "-f", "s16le", "-ar", "24000", "-ac", "1", "pipe:1"], { stdio: ["pipe", "pipe", "ignore"] });
+  const pieces = [];
+  decoder.stdout.on("data", piece => pieces.push(piece));
+  const closed = once(decoder, "close");
+  decoder.stdin.end(bytes);
+  const [code] = await closed;
+  assert.equal(code, 0, "MP3 decodes");
+  const pcm = Buffer.concat(pieces);
+  return Int16Array.from({ length: pcm.length / 2 }, (_, i) => pcm.readInt16LE(i * 2));
+}
+
+// Frequency from hysteresis zero crossings over a central window, away from encoder padding and chunk joins.
+function centralFrequency(samples, windowSeconds = 0.4) {
+  const length = Math.round(windowSeconds * 24_000);
+  const start = Math.floor((samples.length - length) / 2);
+  let crossings = 0;
+  let sign = 0;
+  for (let i = start; i < start + length; i++) {
+    const next = samples[i] > 500 ? 1 : samples[i] < -500 ? -1 : sign;
+    if (sign && next !== sign) crossings++;
+    sign = next;
+  }
+  return crossings / 2 / windowSeconds;
+}
+
 const status = (base, id) => fetch(`${base}/api/streaming/${id}/status`).then(r => r.json());
 const recordingEntries = async directory => (await readdir(directory)).filter(name => name !== ".reader-instance.lock");
 
@@ -64,7 +92,7 @@ test("spool ownership lock stays inside its writable mount on a read-only runtim
   const engine = new StreamingNarrations({ spoolDir, synthesizeChunk: async () => wav() });
   t.after(async () => { await chmod(parent, 0o700); await engine.close(); await rm(parent, { recursive: true, force: true }); });
   await chmod(parent, 0o500);
-  const session = await engine.create({ text: "Writable spool fixture.", voice: "af_heart", speed: 1 });
+  const session = await engine.create({ text: "Writable spool fixture.", voice: "jane", speed: 1 });
   await session.done;
   assert.equal(session.state, "ready");
   assert.equal(engine.lockPath, join(spoolDir, ".reader-instance.lock"));
@@ -97,7 +125,7 @@ test("first creation after a hard crash removes abandoned recordings without del
     import { StreamingNarrations } from "./streaming.mjs";
     const engine = new StreamingNarrations({ spoolDir: ${JSON.stringify(spoolDir)},
       synthesizeChunk: async () => Buffer.from(${JSON.stringify(wav(0.1).toString("base64"))}, "base64") });
-    const session = await engine.create({ text: "A ready recording", voice: "af_heart", speed: 1 });
+    const session = await engine.create({ text: "A ready recording", voice: "jane", speed: 1 });
     await session.done;
     if (session.state !== "ready") throw new Error(session.error);
     console.log(JSON.stringify({ directory: session.directory }));
@@ -172,7 +200,7 @@ test("capacity evicts inactive recordings, never an actively consumed recording"
   assert.equal(second.text, null);
   assert.equal((await recordingEntries(spoolDir)).length, 2);
   third.consumers = 1;
-  await assert.rejects(server.narrations.create({ text: "Fourth", voice: "af_heart", speed: 1 }), error => error.status === 429);
+  await assert.rejects(server.narrations.create({ text: "Fourth", voice: "jane", speed: 1 }), error => error.status === 429);
   third.consumers = 0;
 });
 
@@ -181,13 +209,13 @@ test("each default app owns its spool; explicit spool cannot be shared by live i
   const second = new StreamingNarrations({ synthesizeChunk: async () => wav(0.1) });
   t.after(() => Promise.all([first.close(), second.close()]));
   assert.notEqual(first.spoolDir, second.spoolDir);
-  const a = await first.create({ text: "First", voice: "af_heart", speed: 1 }); await a.done;
-  const b = await second.create({ text: "Second", voice: "af_heart", speed: 1 }); await b.done;
+  const a = await first.create({ text: "First", voice: "jane", speed: 1 }); await a.done;
+  const b = await second.create({ text: "Second", voice: "jane", speed: 1 }); await b.done;
   await first.close();
   assert.ok((await readdir(b.directory)).includes("audio.mp3"));
   const impostor = new StreamingNarrations({ spoolDir: second.spoolDir, synthesizeChunk: async () => wav(0.1) });
   t.after(() => impostor.close());
-  await assert.rejects(impostor.create({ text: "Intruder", voice: "af_heart", speed: 1 }), /already owned/);
+  await assert.rejects(impostor.create({ text: "Intruder", voice: "jane", speed: 1 }), /already owned/);
   assert.ok((await readdir(b.directory)).includes("audio.mp3"));
 });
 
@@ -201,13 +229,13 @@ test("close cancels generation, clears files, is idempotent and rejects admissio
   assert.deepEqual(await readdir(spoolDir), []);
   assert.equal(server.narrations.sessions.size, 0);
   await server.shutdown();
-  await assert.rejects(server.narrations.create({ text: "Late", voice: "af_heart", speed: 1 }), /shutting down/);
+  await assert.rejects(server.narrations.create({ text: "Late", voice: "jane", speed: 1 }), /shutting down/);
   const raced = new StreamingNarrations({ spoolDir: join(spoolDir, "raced"), synthesizeChunk: async () => wav() });
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   const prepare = raced.prepareSpool.bind(raced);
   raced.prepareSpool = async () => { await gate; await prepare(); };
-  const admission = raced.create({ text: "Raced", voice: "af_heart", speed: 1 });
+  const admission = raced.create({ text: "Raced", voice: "jane", speed: 1 });
   const rejected = assert.rejects(admission, /shutting down/);
   const closed = raced.close();
   release();
@@ -230,7 +258,7 @@ test("normal server SIGTERM/SIGINT close connections, inference and the spool", 
       installShutdown(server);
       server.listen(0, "127.0.0.1");
       await once(server, "listening");
-      const session = await server.narrations.create({ text: "Pending work", voice: "af_heart", speed: 1 });
+      const session = await server.narrations.create({ text: "Pending work", voice: "jane", speed: 1 });
       console.log(JSON.stringify({ id: session.id }));
     `], { stdio: ["ignore", "pipe", "pipe"] });
     t.after(() => child.kill("SIGKILL"));
@@ -252,6 +280,55 @@ test("WAV parsing validates actual PCM layout and chunk boundaries", () => {
   assert.throws(() => pcmFromWav(stereo), /mono/);
   const wrongRate = Buffer.from(bytes); wrongRate.writeUInt32LE(44_100, 24);
   assert.throws(() => pcmFromWav(wrongRate), /24/);
+});
+
+test("streaming speed is applied once by FFmpeg atempo while upstream synthesis stays at speed 1", async t => {
+  const sourceSeconds = [1, 2, 1.5]; // Independent expectation: the fixture durations, not PCM measured by the engine.
+  const totalSource = sourceSeconds.reduce((sum, seconds) => sum + seconds, 0);
+  for (const speed of [0.5, 1.5, 2]) {
+    await t.test(`speed ${speed}`, async t => {
+      const requests = [];
+      const accountedBefore = [];
+      const { base, post, server } = await app(t, { synthesizeChunk: async body => {
+        const [session] = server.narrations.sessions.values();
+        accountedBefore.push(session.audioSecondsGenerated);
+        requests.push(body);
+        return wav(sourceSeconds[requests.length - 1]);
+      } });
+      const response = await post("/api/streaming",
+        { text: "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.", voice: "estelle", speed });
+      assert.equal(response.status, 201);
+      const { id } = await response.json();
+      await server.narrations.sessions.get(id).done;
+      const ready = await status(base, id);
+      assert.equal(ready.state, "ready");
+      assert.equal(ready.generated, 3);
+
+      // Session keeps the listener's selection; every upstream request is unmodified speed 1.
+      assert.equal(ready.voice, "estelle"); assert.equal(ready.speed, speed);
+      const content = await (await fetch(`${base}/api/streaming/${id}/content`)).json();
+      assert.equal(content.voice, "estelle"); assert.equal(content.speed, speed);
+      assert.deepEqual(requests, ["First paragraph.", "Second paragraph.", "Third paragraph."]
+        .map(text => ({ text, voice: "estelle", speed: 1 })));
+
+      // Accounting is cumulative output seconds: source seconds divided by speed, chunk by chunk.
+      const cumulative = sourceSeconds.map((_, i) => sourceSeconds.slice(0, i).reduce((s, x) => s + x, 0) / speed);
+      accountedBefore.forEach((value, i) => assert.ok(Math.abs(value - cumulative[i]) < 1e-9,
+        `before chunk ${i + 1}: ${value} vs ${cumulative[i]}`));
+      assert.ok(Math.abs(ready.audioSecondsGenerated - totalSource / speed) < 1e-9,
+        `accounted ${ready.audioSecondsGenerated}s, expected ${totalSource / speed}s`);
+
+      // Actual decoded audio duration matches source/speed (omitted, inverted or doubled tempo would be far off).
+      const samples = await decodeMp3(Buffer.from(await (await fetch(`${base}/api/streaming/${id}/audio`)).arrayBuffer()));
+      const actual = samples.length / 24_000;
+      const expected = totalSource / speed;
+      assert.ok(Math.abs(actual - expected) < Math.max(0.15, expected * 0.04),
+        `decoded ${actual.toFixed(3)}s, expected about ${expected}s at speed ${speed}`);
+      // Tempo change, not resampling: the 440 Hz tone keeps its pitch.
+      const frequency = centralFrequency(samples);
+      assert.ok(Math.abs(frequency - 440) < 22, `central pitch ${frequency} Hz, expected about 440 Hz`);
+    });
+  }
 });
 
 test("real MP3 bytes arrive before later chunks are generated; disconnected playback does not own synthesis", async (t) => {
@@ -307,15 +384,16 @@ test("bounded admission, validation and cross-origin rejection happen before inf
   const { post, create } = await app(t, { synthesizeChunk: async (body, signal) => {
     calls++; await delay(10_000, undefined, { signal }); return wav();
   } });
-  for (const body of [null, {}, { text: " " }, { text: "x".repeat(100001), voice: "af_heart", speed: 1 },
-    { text: "hello", voice: "unknown", speed: 1 }, { text: "hello", voice: "af_heart", speed: 3 },
-    { text: "hello", voice: "af_heart", speed: 1, paceSeconds: 100 }]) {
+  for (const body of [null, {}, { text: " " }, { text: "x".repeat(100001), voice: "jane", speed: 1 },
+    { text: "hello", voice: "unknown", speed: 1 }, { text: "hello", voice: "jane", speed: 3 },
+    { text: "hello", voice: "jane", speed: 1, paceSeconds: 100 },
+    ...["af_heart", "af_nicole", "am_michael", "ff_siwis"].map(voice => ({ text: "hello", voice, speed: 1 }))]) {
     assert.equal((await post("/api/streaming", body)).status, 400);
   }
   assert.equal((await post("/api/streaming", {}, { Origin: "https://evil.example" })).status, 403);
   assert.equal(calls, 0);
   await create();
-  const busy = await post("/api/streaming", { text: "Another", voice: "af_heart", speed: 1 });
+  const busy = await post("/api/streaming", { text: "Another", voice: "jane", speed: 1 });
   assert.equal(busy.status, 429);
   assert.equal(busy.headers.get("retry-after"), "2");
 });
@@ -325,7 +403,7 @@ test("concurrent creation cannot bypass single-generation admission", async (t) 
     await delay(10_000, undefined, { signal }); return wav();
   } });
   const results = await Promise.all(Array.from({ length: 3 }, () => post("/api/streaming", {
-    text: "Concurrent narration", voice: "af_heart", speed: 1,
+    text: "Concurrent narration", voice: "jane", speed: 1,
   })));
   assert.deepEqual(results.map(r => r.status).sort(), [201, 429, 429]);
 });

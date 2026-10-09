@@ -4,7 +4,7 @@ import { StreamingPlayer } from "../stream-player.mjs";
 import { PlaybackBookmark } from "../public/streaming-state.js";
 
 const id = "81b16cd8-fab8-4ed9-b855-7f127299e944";
-const content = { text: "Recover this article without generating it again.", title: "A saved article", byline: "Fixture", sourceUrl: "https://example.com/article", voice: "am_michael", speed: 1.2 };
+const content = { text: "Recover this article without generating it again.", title: "A saved article", byline: "Fixture", sourceUrl: "https://example.com/article", voice: "bill_boerst", speed: 1.2 };
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 // Unit-only media model. Browser tests separately exercise actual native MP3 playback.

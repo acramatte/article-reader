@@ -178,7 +178,9 @@ export class StreamingNarrations {
     let exited;
     try {
       encoder = spawn(this.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-f", "s16le", "-ar", "24000", "-ac", "1",
-        "-probesize", "32", "-analyzeduration", "1", "-i", "pipe:0", "-c:a", "libmp3lame", "-b:a", "64k", "-write_xing", "0", "-id3v2_version", "0",
+        "-probesize", "32", "-analyzeduration", "1", "-i", "pipe:0",
+        ...(session.speed === 1 ? [] : ["-af", `atempo=${session.speed}`]),
+        "-c:a", "libmp3lame", "-b:a", "64k", "-write_xing", "0", "-id3v2_version", "0",
         "-flush_packets", "1", "-f", "mp3", "pipe:1"], { stdio: ["pipe", "pipe", "ignore"] });
       session.encoder = encoder;
       encoder.stdin.on("error", () => {}); // Write callbacks below report EPIPE; never crash the Node process.
@@ -191,13 +193,13 @@ export class StreamingNarrations {
       for (const text of session.chunks) {
         if (session.generated && session.paceSeconds) await delay(session.paceSeconds * 1000, undefined, { signal });
         signal.throwIfAborted();
-        const wav = await this.synthesizeChunk({ text, voice: session.voice, speed: session.speed }, signal,
+        const wav = await this.synthesizeChunk({ text, voice: session.voice, speed: 1 }, signal,
           warming => { session.warming = warming; });
         signal.throwIfAborted();
         const pcm = pcmFromWav(wav);
         await new Promise((resolve, reject) => encoder.stdin.write(pcm, error => error ? reject(error) : resolve()));
         session.generated++;
-        session.audioSecondsGenerated += pcm.length / 48_000;
+        session.audioSecondsGenerated += pcm.length / 48_000 / session.speed;
       }
       encoder.stdin.end();
       const code = await exited;

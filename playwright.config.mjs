@@ -9,7 +9,7 @@ export default defineConfig({
   testIgnore: "streaming.spec.mjs", // The isolated streaming entry point has its own acceptance config.
   timeout: 120_000,
   expect: { timeout: 15_000 },
-  workers: 1, // The local Kokoro service serializes inference.
+  workers: 1, // The local Pocket TTS service serializes inference.
   outputDir: join(".ui-review", "playwright"),
   use: { baseURL: `http://127.0.0.1:${uiPort}`, screenshot: "only-on-failure", trace: "retain-on-failure" },
   webServer: [

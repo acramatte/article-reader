@@ -1,0 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+pocket-tts==3.3.0
+torch==2.14.1+cpu
+torchao==0.18.0+cpu
+fastapi==0.142.2
+uvicorn==0.54.0
+numpy==2.5.3
+soundfile==0.14.0
+huggingface-hub==1.33.0
+pyyaml==6.0.3

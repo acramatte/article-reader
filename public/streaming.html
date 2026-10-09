@@ -21,7 +21,7 @@
 </head>
 <body>
   <h1>Locked-screen streaming test</h1>
-  <p class="muted">Experimental: real Kokoro speech → one continuous MP3 stream → Android media playback. The normal reader now uses the same media delivery.</p>
+  <p class="muted">Experimental: real <span id="tts-engine">speech engine</span> speech → one continuous MP3 stream → Android media playback. The normal reader now uses the same media delivery.</p>
   <form id="form">
     <label for="url">Article URL (optional; otherwise use the text below)</label>
     <input id="url" type="url" placeholder="https://…" />
@@ -38,11 +38,11 @@ After listening for at least a minute, unlock the phone and inspect the test rep
 
 The final paragraph ends the recording naturally. Stop cancels the session, and restarting the server discards it.</textarea>
     <div class="row">
-      <label>Voice <select id="voice"><optgroup label="American English · Female"><option value="af_heart">Heart</option><option value="af_nicole">Nicole</option></optgroup><optgroup label="American English · Male"><option value="am_michael">Michael</option></optgroup><optgroup label="French · Female"><option value="ff_siwis">Siwis</option></optgroup></select></label>
+      <label>Voice <select id="voice" disabled></select></label>
       <label>Speed <select id="speed"><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="0.75">0.75×</option></select></label>
     </div>
     <label><input id="pace" type="checkbox" /> Add a five-second gap between synthesis requests, to make generation after locking observable. Test only: this can cause buffering even at 1×.</label>
-    <div class="row"><button id="start" type="submit">Start streaming test</button><button id="stop" type="button" disabled>Stop</button></div>
+    <div class="row"><button id="start" type="submit" disabled>Start streaming test</button><button id="stop" type="button" disabled>Stop</button></div>
   </form>
   <section class="card" aria-label="Playback">
     <p id="status" role="status">Ready to test.</p>

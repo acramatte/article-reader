@@ -3,9 +3,9 @@ name: Inference container
 on:
   push:
     branches: [main]
-    paths: ['kokoro-service/**', 'scripts/smoke-kokoro.py', '.github/workflows/inference.yml']
+    paths: ['pocket-tts-service/**', 'kokoro-service/**', 'scripts/smoke-pocket-tts.py', 'scripts/smoke-kokoro.py', '.github/workflows/inference.yml']
   pull_request:
-    paths: ['kokoro-service/**', 'scripts/smoke-kokoro.py', '.github/workflows/inference.yml']
+    paths: ['pocket-tts-service/**', 'kokoro-service/**', 'scripts/smoke-pocket-tts.py', 'scripts/smoke-kokoro.py', '.github/workflows/inference.yml']
   workflow_dispatch:
 
 permissions:
@@ -19,26 +19,37 @@ jobs:
   inference:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - engine: pocket-tts
+            service: pocket-tts-service
+          - engine: kokoro
+            service: kokoro-service
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Build CPU inference image
-        run: docker build --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" --label "org.opencontainers.image.revision=${GITHUB_SHA}" -t article-reader-kokoro:ci kokoro-service
-      - name: Verify short real offline inference
-        timeout-minutes: 3
-        run: python3 scripts/smoke-kokoro.py article-reader-kokoro:ci --quick
+        run: docker build --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" --label "org.opencontainers.image.revision=${GITHUB_SHA}" -t article-reader-${{ matrix.engine }}:ci ${{ matrix.service }}
+      - name: Verify WAV validation rejects runaway audio
+        if: matrix.engine == 'pocket-tts'
+        run: python3 -m unittest discover -s pocket-tts-service -p 'test_*.py'
+      - name: Verify short real offline inference (all voices)
+        # The runner's own quick-mode process deadline is 300 seconds; this step bound adds headroom for cleanup.
+        timeout-minutes: 6
+        run: python3 scripts/smoke-${{ matrix.engine }}.py article-reader-${{ matrix.engine }}:ci --quick
       - name: Publish GHCR inference image
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          image="ghcr.io/${GITHUB_REPOSITORY,,}-kokoro"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}-${{ matrix.engine }}"
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           trap 'docker logout ghcr.io' EXIT
-          docker tag article-reader-kokoro:ci "$image:sha-$GITHUB_SHA"
-          docker tag article-reader-kokoro:ci "$image:stable"
+          docker tag article-reader-${{ matrix.engine }}:ci "$image:sha-$GITHUB_SHA"
+          docker tag article-reader-${{ matrix.engine }}:ci "$image:stable"
           docker push "$image:sha-$GITHUB_SHA"
           docker push "$image:stable"

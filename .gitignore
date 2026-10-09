@@ -1,5 +1,6 @@
 node_modules/
 dist/
+pocket-tts-service/.venv/
 kokoro-service/.venv/
 __pycache__/
 *.pyc
