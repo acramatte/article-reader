@@ -18,6 +18,7 @@ export class StreamingPlayer {
     this.playRevision = 0;
     this.firstAudioSeconds = null;
     this.underruns = 0;
+    this.timeOffset = 0; // Recording time at which the attached audio begins.
     this.startedAt = now();
     this.listeners = {
       playing: () => {
@@ -55,7 +56,7 @@ export class StreamingPlayer {
         if (code === 2 || this.restoring) {
           this.savePosition(true);
           this.restoring = true;
-          this.recovery ??= { id: this.id, title: this.title, positionSeconds: this.audio.currentTime };
+          this.recovery ??= { id: this.id, title: this.title, positionSeconds: this.position() };
           this.recoveryPhase = "connection";
           this.warning = "Audio connection failed. Retry to recover the existing recording.";
           this.retryAvailable = true;
@@ -99,7 +100,7 @@ export class StreamingPlayer {
       warming: Boolean(this.snapshot?.warming && this.firstAudioSeconds === null && !this.controller.signal.aborted),
       error: this.error, warning: this.warning || this.bookmark?.warning,
       recovering: this.restoring, recovered: this.recovered, recoveryPhase: this.recoveryPhase,
-      positionSeconds: this.audio.currentTime, retryAvailable: Boolean(this.retryAvailable), needsGesture: this.needsGesture,
+      positionSeconds: this.position(), retryAvailable: Boolean(this.retryAvailable), needsGesture: this.needsGesture,
     });
   }
 
@@ -212,12 +213,16 @@ export class StreamingPlayer {
           if (this.controller.signal.aborted) return;
           if (!this.contentRestored) { this.onRestore(content); this.contentRestored = true; }
         }
-        this.recoveryPhase = this.snapshot.state === "ready" || this.snapshot.audioSecondsGenerated >= this.recovery.positionSeconds
+        const complete = this.snapshot.state === "ready";
+        this.recoveryPhase = complete || this.snapshot.audioSecondsGenerated >= this.recovery.positionSeconds
           ? "position" : "generation";
-        if (!this.audio.getAttribute("src") || this.audio.error) {
-          this.seekTarget = null;
+        if ((!this.audio.getAttribute("src") || this.audio.error) && this.recoveryPhase === "position") {
+          // A growing MP3 has no known length, so seeking into it downloads the whole prefix.
+          // Start the same recording at the saved position instead; completed files seek by Range.
+          this.timeOffset = complete ? 0 : this.recovery.positionSeconds;
+          this.seekTarget = complete ? null : 0;
           this.audio.preload = "auto";
-          this.audio.src = `/api/streaming/${this.id}/audio`;
+          this.audio.src = `/api/streaming/${this.id}/audio${this.timeOffset ? `?start=${this.timeOffset.toFixed(3)}` : ""}`;
           this.bindMediaSession();
           this.audio.load();
         }
@@ -240,9 +245,9 @@ export class StreamingPlayer {
 
   restorePosition() {
     if (!this.restoring || this.stopping || this.disposed || !this.contentRestored || this.audio.readyState < 1) return;
-    const complete = this.snapshot?.state === "ready";
-    if (complete ? !Number.isFinite(this.audio.duration) : !(this.snapshot?.audioSecondsGenerated >= this.recovery.positionSeconds)) return;
     if (this.seekTarget == null) {
+      const complete = this.snapshot?.state === "ready";
+      if (complete ? !Number.isFinite(this.audio.duration) : !(this.snapshot?.audioSecondsGenerated >= this.recovery.positionSeconds)) return;
       // Growing MP3 duration can be Infinity or an estimate of its current prefix.
       // Only a completed recording has a final duration to clamp against.
       this.seekTarget = complete
@@ -263,7 +268,11 @@ export class StreamingPlayer {
 
   savePosition(force = false) {
     if (!this.bookmark || !this.id || this.restoring || this.stopping || this.disposed || ["finished", "error", "stopped"].includes(this.state)) return;
-    this.bookmark.save({ id: this.id, title: this.title.slice(0, 200), positionSeconds: this.audio.currentTime }, force);
+    this.bookmark.save({ id: this.id, title: this.title.slice(0, 200), positionSeconds: this.position() }, force);
+  }
+
+  position() {
+    return this.timeOffset + this.audio.currentTime;
   }
 
   async play() {
@@ -356,7 +365,7 @@ export class StreamingPlayer {
     if (!("mediaSession" in navigator)) return;
     navigator.mediaSession.playbackState = ["error", "stopped", "finished"].includes(this.state) ? "none" : this.paused ? "paused" : "playing";
     if (!this.restoring && Number.isFinite(this.audio.duration) && this.audio.duration > 0) {
-      try { navigator.mediaSession.setPositionState({ duration: this.audio.duration, playbackRate: this.audio.playbackRate, position: Math.min(this.audio.currentTime, this.audio.duration) }); }
+      try { navigator.mediaSession.setPositionState({ duration: this.timeOffset + this.audio.duration, playbackRate: this.audio.playbackRate, position: this.timeOffset + Math.min(this.audio.currentTime, this.audio.duration) }); }
       catch { /* Some browsers do not implement position state. */ }
     }
   }

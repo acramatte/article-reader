@@ -106,7 +106,7 @@ test("Stop during recovery ignores a late ready status and cannot recreate the b
   } finally { release(); }
 });
 
-test("in-progress recovery seeks and resumes generated audio before completion without recreating narration", async ({ page, request }) => {
+test("in-progress recovery starts and resumes generated audio at the saved position before completion without recreating narration", async ({ page, request }) => {
   const id = await recoveryFixture(page, request, 8);
   let creates = 0;
   page.on("request", req => {
@@ -114,7 +114,7 @@ test("in-progress recovery seeks and resumes generated audio before completion w
   });
   await page.reload();
   await expect(page.locator("#resume")).toBeEnabled({ timeout: 60_000 });
-  expect(await page.locator("#audio").getAttribute("src")).toBe(`/api/streaming/${id}/audio`);
+  expect(await page.locator("#audio").getAttribute("src")).toBe(`/api/streaming/${id}/audio?start=6.000`);
   expect(await page.evaluate(() => window.streamingProbe().id)).toBe(id);
   expect(await page.evaluate(() => window.streamingProbe().currentTime)).toBeCloseTo(6, 0);
   expect(await page.evaluate(() => window.streamingProbe().paused)).toBe(true);

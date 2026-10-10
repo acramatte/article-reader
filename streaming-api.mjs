@@ -65,7 +65,11 @@ export function createStreamingApi(options, readJson) {
       if (session.text === null) json(410, { error: "Narration content is no longer available." });
       else json(200, { text: session.text, title: session.title, byline: session.byline, sourceUrl: session.sourceUrl,
         voice: session.voice, speed: session.speed });
-    } else if (request.method === "GET" && action === "audio") await narrations.audio(session, request, response);
+    } else if (request.method === "GET" && action === "audio") {
+      const start = url.searchParams.get("start");
+      if (start !== null && !/^\d{1,6}(?:\.\d{1,3})?$/.test(start)) json(400, { error: "start must be a playback position in seconds." });
+      else await narrations.audio(session, request, response, { startSeconds: Number(start) });
+    }
     else if (request.method === "POST" && action === "stop") {
       await narrations.stop(session); json(200, narrations.snapshot(session));
     } else if (request.method === "POST" && action === "mark") {

@@ -7,10 +7,10 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { createStreamingApp } from "../streaming-server.mjs";
-import { pcmFromWav, StreamingNarrations } from "../streaming.mjs";
+import { mp3Frame, pcmFromWav, StreamingNarrations } from "../streaming.mjs";
 
 // Deliberately synthetic tone. Tests exercise real FFmpeg, not speech quality.
-function wav(seconds = 3) {
+function wav(seconds = 3, frequency = 440) {
   const samples = Math.round(seconds * 24_000);
   const bytes = Buffer.alloc(44 + samples * 2);
   bytes.write("RIFF"); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write("WAVEfmt ", 8);
@@ -18,7 +18,7 @@ function wav(seconds = 3) {
   bytes.writeUInt32LE(24_000, 24); bytes.writeUInt32LE(48_000, 28);
   bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34);
   bytes.write("data", 36); bytes.writeUInt32LE(samples * 2, 40);
-  for (let i = 0; i < samples; i++) bytes.writeInt16LE(Math.round(4000 * Math.sin(i * 2 * Math.PI * 440 / 24_000)), 44 + i * 2);
+  for (let i = 0; i < samples; i++) bytes.writeInt16LE(Math.round(4000 * Math.sin(i * 2 * Math.PI * frequency / 24_000)), 44 + i * 2);
   return bytes;
 }
 
@@ -499,6 +499,70 @@ test("real MP3 bytes arrive before later chunks are generated; disconnected play
   const range = await fetch(`${base}/api/streaming/${id}/audio`, { headers: { Range: "bytes=10-29" } });
   assert.equal(range.status, 206);
   assert.deepEqual(new Uint8Array(await range.arrayBuffer()), audio.subarray(10, 30));
+});
+
+test("recovery start serves the growing recording from the frame at the saved position, then follows it", async t => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  const tones = [300, 500, 700, 900];
+  let calls = 0;
+  const { base, create } = await app(t, { synthesizeChunk: async () => {
+    const tone = tones[calls++];
+    if (calls === 4) await gate;
+    return wav(3, tone);
+  } });
+  const { id } = await create({ text: "One.\n\nTwo.\n\nThree.\n\nFour." });
+  await until(() => status(base, id), s => s.generated === 3);
+  const live = await fetch(`${base}/api/streaming/${id}/audio?start=7.5`);
+  assert.equal(live.status, 200);
+  assert.equal(live.headers.get("accept-ranges"), null);
+  assert.equal(live.headers.get("content-length"), null);
+  const reader = live.body.getReader();
+  const pieces = [(await reader.read()).value];
+  assert.equal((await status(base, id)).state, "generating", "bytes arrive before the recording completes");
+  const ranged = await fetch(`${base}/api/streaming/${id}/audio?start=7.5`, { headers: { Range: "bytes=100-" } });
+  assert.equal(ranged.status, 416, "a growing suffix has no addressable length yet");
+  release();
+  for (let piece; !(piece = await reader.read()).done;) pieces.push(piece.value);
+  const suffix = Buffer.concat(pieces);
+  const ready = await until(() => status(base, id), s => s.state === "ready");
+  const full = Buffer.from(await (await fetch(`${base}/api/streaming/${id}/audio`)).arrayBuffer());
+  assert.equal(full.length, ready.bytes);
+
+  // 64 kb/s, 24 kHz MPEG-2 Layer III: fixed 192-byte, 24 ms frames. The suffix is the same file
+  // from the frame that contains 7.5 s, and it kept streaming until generation completed.
+  assert.deepEqual(mp3Frame(full.subarray(0, 4)), { bytes: 192, seconds: 0.024 });
+  const offset = Math.floor(7.5 / 0.024) * 192;
+  assert.equal(suffix.length, full.length - offset);
+  assert.ok(suffix.equals(full.subarray(offset)));
+  const samples = await decodeMp3(suffix);
+  const at = seconds => samples.subarray(Math.round(seconds * 24_000), Math.round((seconds + 0.8) * 24_000));
+  assert.ok(Math.abs(centralFrequency(at(0.3), 0.6) - 700) < 25, "starts inside the third chunk");
+  assert.ok(Math.abs(centralFrequency(at(2.2), 0.6) - 900) < 25, "continues into audio generated after the request");
+
+  // Once complete, the suffix is a finite representation with its own byte ranges.
+  const complete = await fetch(`${base}/api/streaming/${id}/audio?start=7.5`, { headers: { Range: "bytes=10-29" } });
+  assert.equal(complete.status, 206);
+  assert.equal(complete.headers.get("content-range"), `bytes 10-29/${full.length - offset}`);
+  assert.ok(Buffer.from(await complete.arrayBuffer()).equals(full.subarray(offset + 10, offset + 30)));
+  const beyond = await fetch(`${base}/api/streaming/${id}/audio?start=999`);
+  assert.equal(Number(beyond.headers.get("content-length")), 192, "a position past the end clamps to the last frame");
+  await beyond.body.cancel();
+  for (const start of ["-1", "abc", "1e3", "7.5.1", ""]) {
+    const invalid = await fetch(`${base}/api/streaming/${id}/audio?start=${start}`);
+    assert.equal(invalid.status, 400, start);
+    await invalid.body.cancel();
+  }
+  assert.equal(calls, 4, "recovery never synthesizes again");
+});
+
+test("MP3 frame headers are parsed only for Layer III frames", () => {
+  assert.deepEqual(mp3Frame(Buffer.from([0xff, 0xf3, 0x84, 0xc4])), { bytes: 192, seconds: 0.024 }); // MPEG-2, 64 kb/s, 24 kHz
+  assert.deepEqual(mp3Frame(Buffer.from([0xff, 0xfb, 0x92, 0x64])), { bytes: 418, seconds: 1152 / 44_100 }); // MPEG-1, 128 kb/s, 44.1 kHz, padded
+  for (const header of [[0x49, 0x44, 0x33, 0x04], [0xff, 0xfd, 0x84, 0xc4], [0xff, 0xf3, 0xf4, 0xc4], [0xff, 0xf3, 0x8c, 0xc4], [0xff, 0xf3]]) {
+    assert.equal(mp3Frame(Buffer.from(header)), null);
+  }
 });
 
 test("Stop cancels pending work, deletes spool and allows a fresh session", async (t) => {

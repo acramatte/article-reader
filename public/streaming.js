@@ -22,14 +22,17 @@ let narrationTitle = "Locked-screen narration test";
 let recovery = null;
 let restoring = false;
 let seekTarget = null;
+let timeOffset = 0; // Recording time at which the attached audio begins.
 let restoredPositionSeconds = null;
 let revision = 0;
 const wasDiscarded = document.wasDiscarded === true;
 const navigationType = performance.getEntriesByType("navigation")[0]?.type || "unknown";
 
+const position = () => timeOffset + audio.currentTime;
+
 function savePosition(force = false) {
   if (!id || restoring || stopping || ["stopped", "error"].includes(snapshot?.state)) return;
-  bookmark.save({ id, title: narrationTitle, positionSeconds: audio.currentTime }, force);
+  bookmark.save({ id, title: narrationTitle, positionSeconds: position() }, force);
 }
 
 function forgetRecovery(messageText) {
@@ -41,6 +44,7 @@ function forgetRecovery(messageText) {
   audio.removeAttribute("src");
   audio.load();
   audio.controls = true;
+  timeOffset = 0;
   recovery = null;
   restoring = false;
   message = messageText;
@@ -48,19 +52,19 @@ function forgetRecovery(messageText) {
 }
 
 function finishRecovery() {
-  restoredPositionSeconds = audio.currentTime;
+  restoredPositionSeconds = position();
   restoring = false;
   audio.controls = true;
-  message = `Recording restored at ${audio.currentTime.toFixed(1)} seconds. Tap Resume saved recording.`;
+  message = `Recording restored at ${restoredPositionSeconds.toFixed(1)} seconds. Tap Resume saved recording.`;
   savePosition(true);
   render();
 }
 
 function restorePosition() {
   if (!restoring || !recovery || stopping || audio.readyState < 1) return;
-  const complete = snapshot?.state === "ready";
-  if (complete ? !Number.isFinite(audio.duration) : !(snapshot?.audioSecondsGenerated >= recovery.positionSeconds)) return;
   if (seekTarget === null) {
+    const complete = snapshot?.state === "ready";
+    if (complete ? !Number.isFinite(audio.duration) : !(snapshot?.audioSecondsGenerated >= recovery.positionSeconds)) return;
     seekTarget = complete
       ? Math.min(recovery.positionSeconds, Math.max(0, audio.duration - 0.05))
       : recovery.positionSeconds;
@@ -72,9 +76,14 @@ function restorePosition() {
 function attachRecoveredAudio() {
   if (!restoring || (audio.getAttribute("src") && !audio.error)) return;
   audio.controls = false; // Prevent playback from zero before the saved seek completes.
+  const complete = snapshot.state === "ready";
+  if (!complete && !(snapshot.audioSecondsGenerated >= recovery.positionSeconds)) return;
   audio.preload = "auto";
-  seekTarget = null;
-  audio.src = `/api/streaming/${id}/audio`;
+  // A growing MP3 has no known length, so seeking into it downloads the whole prefix.
+  // Start the same recording at the saved position instead; completed files seek by Range.
+  timeOffset = complete ? 0 : recovery.positionSeconds;
+  seekTarget = complete ? null : 0;
+  audio.src = `/api/streaming/${id}/audio${timeOffset ? `?start=${timeOffset.toFixed(3)}` : ""}`;
   mediaSession(narrationTitle);
   message = "Restoring the saved position…";
   audio.load();
@@ -102,10 +111,10 @@ function render() {
   $("#resume").hidden = !recovery;
   $("#resume").disabled = restoring || stopping || !id || !["generating", "ready"].includes(snapshot?.state) || !audio.paused;
   if (snapshot) {
-    const playedBeyondMark = Boolean(snapshot.mark && audio.currentTime > snapshot.mark.audioSecondsGenerated + 0.2);
+    const playedBeyondMark = Boolean(snapshot.mark && position() > snapshot.mark.audioSecondsGenerated + 0.2);
     text("#evidence", !snapshot.mark ? "When speech starts, mark the test and lock your phone."
       : `Chunks generated after mark: ${snapshot.generatedAfterMark}. Playback beyond the pre-mark generated audio: ${playedBeyondMark ? "yes" : "not yet"}.`);
-    text("#report", JSON.stringify({ ...snapshot, playbackSeconds: audio.currentTime, paused: audio.paused,
+    text("#report", JSON.stringify({ ...snapshot, playbackSeconds: position(), paused: audio.paused,
       firstPlaybackSeconds, pageHides, playedBeyondMark, mediaSession: "mediaSession" in navigator,
       recovered: Boolean(recovery), restoredPositionSeconds, wasDiscarded, navigationType,
       recoveryStorageWarning: bookmark.warning,
@@ -197,6 +206,7 @@ $("#form").addEventListener("submit", async event => {
   recovery = null;
   restoring = false;
   seekTarget = null;
+  timeOffset = 0;
   restoredPositionSeconds = null;
   audio.controls = true;
   audio.preload = "none";
@@ -274,7 +284,7 @@ $("#stop").addEventListener("click", async () => {
 
 $("#mark").addEventListener("click", async () => {
   try {
-    snapshot = await post(`/api/streaming/${id}/mark`, { playbackSeconds: audio.currentTime });
+    snapshot = await post(`/api/streaming/${id}/mark`, { playbackSeconds: position() });
     message = "Test marked. Lock the phone now and keep listening.";
     render();
   } catch (error) { message = error.message; render(); }
@@ -312,7 +322,8 @@ window.addEventListener("pagehide", () => savePosition(true));
 window.addEventListener("pageshow", event => { if (event.persisted) void refresh(); });
 
 // Read-only inspection handle for browser/device acceptance, not a playback dependency.
-window.streamingProbe = () => ({ id, snapshot, firstPlaybackSeconds, currentTime: audio.currentTime,
+// currentTime is the recording position, including the start offset of recovered audio.
+window.streamingProbe = () => ({ id, snapshot, firstPlaybackSeconds, currentTime: position(), timeOffset,
   paused: audio.paused, readyState: audio.readyState, pageHides, failures,
   recovered: Boolean(recovery), restoring, restoredPositionSeconds, wasDiscarded, navigationType });
 void loadTtsSettings($("#voice")).then(tts => {

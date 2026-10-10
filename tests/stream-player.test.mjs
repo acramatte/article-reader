@@ -207,13 +207,14 @@ test("recovery restores content and position but requires an explicit play actio
   assert.equal(calls.filter(call => call.path === "/api/streaming").length, 0);
 });
 
-test("in-progress recovery waits only for audio at the saved position, then offers explicit Resume", async t => {
+test("in-progress recovery waits for audio at the saved position, starts the recording there, then offers explicit Resume", async t => {
   const generating = { state: "generating", generated: 1, total: 3, audioSecondsGenerated: 5.99 };
   const { player, audio, bookmark, calls, events, updates } = fixture(t, path => path.endsWith("/status") ? generating : content);
   audio.duration = Infinity;
   bookmark.save({ id, title: content.title, positionSeconds: 6 }, true);
   await player.restore();
-  assert.equal(audio.src, `/api/streaming/${id}/audio`);
+  assert.equal(audio.getAttribute("src"), null, "nothing is downloaded before the saved position exists");
+  assert.equal(updates.at(-1).recoveryPhase, "generation");
   audio.dispatchEvent(new Event("timeupdate"));
   assert.equal(bookmark.load().positionSeconds, 6);
   await player.togglePause();
@@ -222,16 +223,23 @@ test("in-progress recovery waits only for audio at the saved position, then offe
   audio.readyState = 0;
   events[0].send({ ...generating, audioSecondsGenerated: 6.01 });
   await tick();
+  // A growing MP3 cannot be seeked without reading its prefix; the server starts it at the position.
+  assert.equal(audio.src, `/api/streaming/${id}/audio?start=6.000`);
   assert.equal(updates.at(-1).recovering, true);
   assert.equal(bookmark.load().positionSeconds, 6);
   audio.readyState = 1;
   audio.dispatchEvent(new Event("loadedmetadata"));
-  assert.equal(audio.currentTime, 6);
+  assert.equal(audio.currentTime, 0, "no media seek is needed");
   assert.equal(updates.at(-1).recovering, false);
+  assert.equal(updates.at(-1).positionSeconds, 6);
   assert.equal(updates.at(-1).paused, true);
   assert.equal(audio.playCalls, 0);
   await player.togglePause();
   assert.equal(audio.playCalls, 1);
+  audio.position = 2.5;
+  audio.pause();
+  assert.equal(bookmark.load().positionSeconds, 8.5, "bookmarks stay on the recording timeline");
+  assert.equal(updates.at(-1).positionSeconds, 8.5);
   assert.equal(calls.filter(call => call.path === "/api/streaming").length, 0);
   assert.equal(calls.filter(call => call.path.endsWith("/content")).length, 1);
 });

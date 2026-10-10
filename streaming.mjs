@@ -39,6 +39,19 @@ export function pcmFromWav(bytes) {
   return pcm;
 }
 
+// MPEG audio Layer III frame header (the encoder's only output). Returns null for anything else.
+const layer3Kbps = [[0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+  [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]];
+export function mp3Frame(header) {
+  if (header.length < 4 || header[0] !== 0xff || (header[1] & 0xe0) !== 0xe0 || ((header[1] >> 1) & 3) !== 1) return null;
+  const version = (header[1] >> 3) & 3; // 3: MPEG-1, 2: MPEG-2, 0: MPEG-2.5
+  const kbps = layer3Kbps[version === 3 ? 1 : 0][header[2] >> 4];
+  const rate = [44_100, 48_000, 32_000][(header[2] >> 2) & 3] / (version === 3 ? 1 : version === 2 ? 2 : 4);
+  if (version === 1 || !kbps || !rate) return null;
+  const samples = version === 3 ? 1152 : 576;
+  return { bytes: Math.floor(samples / 8 * kbps * 1000 / rate) + ((header[2] >> 1) & 1), seconds: samples / rate };
+}
+
 export class StreamingNarrations {
   constructor({ spoolDir = process.env.STREAM_SPOOL_DIR, synthesizeChunk, ffmpegPath = "ffmpeg", maxAudioBytes = 64_000_000,
     generationMs = 1_200_000, retentionMs = 21_600_000, disconnectMs = 120_000, maxSessions = 4 }) {
@@ -331,7 +344,38 @@ export class StreamingNarrations {
     })();
   }
 
-  async audio(session, request, response) {
+  // Byte offset of the frame playing at `seconds`, from frame headers rather than an assumed bitrate.
+  // Waits while that point is still being encoded; a finished recording clamps to its last frame.
+  async frameStart(session, seconds, signal) {
+    const file = await open(session.path, "r");
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      let start = 0;
+      let length = 0;
+      let previous = 0;
+      for (let offset = 0, elapsed = 0; ;) {
+        if (offset + 4 > start + length) {
+          while (offset + 4 > session.bytes) {
+            if (terminal(session.state)) return previous;
+            await delay(100, undefined, { signal });
+          }
+          start = offset;
+          ({ bytesRead: length } = await file.read(buffer, 0, Math.min(buffer.length, session.bytes - offset), offset));
+          if (length < 4) throw new Error("Generated audio could not be read.");
+        }
+        const frame = mp3Frame(buffer.subarray(offset - start, offset - start + 4));
+        if (!frame) throw new Error("Generated audio is not a contiguous MP3 frame stream.");
+        if (elapsed + frame.seconds > seconds) return offset;
+        previous = offset;
+        offset += frame.bytes;
+        elapsed += frame.seconds;
+      }
+    } finally { await file.close(); }
+  }
+
+  // `startSeconds` serves the same recording from a frame boundary, for recovery while it is
+  // still growing: browsers cannot seek a growing MP3 of unknown length without reading its prefix.
+  async audio(session, request, response, { startSeconds = 0 } = {}) {
     const controller = new AbortController();
     const signal = controller.signal;
     const disconnected = () => controller.abort();
@@ -342,27 +386,30 @@ export class StreamingNarrations {
     let file;
     try {
       while (!session.bytes && !terminal(session.state)) await delay(100, undefined, { signal });
+      const base = startSeconds > 0 && session.bytes ? await this.frameStart(session, startSeconds, signal) : 0;
       if (["stopped", "error"].includes(session.state)) {
         response.writeHead(session.state === "error" ? 502 : 410, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         return response.end(JSON.stringify({ error: session.error || "Narration stopped." }));
       }
-      let offset = 0;
+      let offset = base;
       let end = Infinity;
       let status = 200;
       const headers = { "Content-Type": "audio/mpeg", "Cache-Control": "no-store", "X-Accel-Buffering": "no",
         "X-Content-Type-Options": "nosniff" };
       if (session.state === "ready") {
+        // Ranges address this response's representation, which starts at `base`.
+        const size = session.bytes - base;
         end = session.bytes;
         headers["Accept-Ranges"] = "bytes";
         if (request.headers.range) {
           const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range);
-          if (!range || Number(range[1]) >= end || (range[2] && Number(range[2]) < Number(range[1]))) {
-            response.writeHead(416, { ...headers, "Content-Range": `bytes */${end}` });
+          if (!range || Number(range[1]) >= size || (range[2] && Number(range[2]) < Number(range[1]))) {
+            response.writeHead(416, { ...headers, "Content-Range": `bytes */${size}` });
             return response.end();
           }
-          offset = Number(range[1]);
-          end = range[2] ? Math.min(end, Number(range[2]) + 1) : end;
-          headers["Content-Range"] = `bytes ${offset}-${end - 1}/${session.bytes}`;
+          offset = base + Number(range[1]);
+          end = range[2] ? Math.min(end, base + Number(range[2]) + 1) : end;
+          headers["Content-Range"] = `bytes ${offset - base}-${end - base - 1}/${size}`;
           status = 206;
         }
         headers["Content-Length"] = end - offset;

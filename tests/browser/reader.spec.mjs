@@ -169,14 +169,19 @@ test("reload during playback restores and resumes a still-generating MP3 without
   expect(saved.positionSeconds).toBeGreaterThan(3);
   await expect(page.locator("#status")).toHaveText("Saved recording ready. Press Resume.");
   await expect(page.locator("#pause")).toBeEnabled();
-  expect(await nativeTime(page)).toBeCloseTo(saved.positionSeconds, 1);
+  // The growing recording is served from the saved frame, so native time starts at zero there.
+  expect(await page.locator("#narration-audio").getAttribute("src")).toBe(`/api/streaming/${saved.id}/audio?start=${saved.positionSeconds.toFixed(3)}`);
+  expect(await nativeTime(page)).toBe(0);
   expect(await page.locator("#narration-audio").evaluate(audio => audio.paused)).toBe(true);
   expect((await (await request.get(`/api/streaming/${saved.id}/status`)).json()).state).toBe("generating");
   await page.waitForTimeout(300);
-  expect(await nativeTime(page)).toBeCloseTo(saved.positionSeconds, 1);
+  expect(await nativeTime(page)).toBe(0);
+  expect((await bookmark(page)).positionSeconds).toBe(saved.positionSeconds);
   await page.locator("#pause").click();
-  await expect.poll(() => nativeTime(page)).toBeGreaterThan(saved.positionSeconds + 0.3);
+  await expect.poll(() => nativeTime(page)).toBeGreaterThan(0.3);
+  await page.locator("#pause").click();
   expect((await bookmark(page)).id).toBe(saved.id);
+  expect((await bookmark(page)).positionSeconds).toBeGreaterThan(saved.positionSeconds + 0.3);
   expect(creates).toBe(1);
   await page.locator("#stop").click();
   await expect(page.locator("#status")).toHaveText("Stopped");
