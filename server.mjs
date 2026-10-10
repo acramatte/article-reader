@@ -76,7 +76,7 @@ export function createApp({
         const upstream = await provider.fetchWav({ text: body.text, voice: body.voice, speed: body.speed },
           AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]));
         if (!upstream.ok) return json(upstream.status, await upstream.json(),
-          upstream.status === 503 ? { "Retry-After": upstream.headers.get("Retry-After") } : {});
+          [429, 503].includes(upstream.status) ? { "Retry-After": upstream.headers.get("Retry-After") } : {});
         const headers = { "Content-Type": "audio/wav", "Cache-Control": "no-store" };
         for (const name of ["X-Audio-Seconds", "X-Generation-Seconds", "X-RTF", "X-Device"]) {
           const value = upstream.headers.get(name);
