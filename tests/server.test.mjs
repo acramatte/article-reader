@@ -272,13 +272,37 @@ test("upstream 503 exposes only a retryable code and Retry-After, not provider d
   }
 });
 
-test("authentication and busy errors are not classified as startup", async (t) => {
-  for (const status of [401, 403, 429]) {
+test("authentication errors are not retryable; busy is retryable but not startup", async (t) => {
+  for (const status of [401, 403]) {
     const post = await app(t, { synthesize: async () => new Response("failed", { status }) });
     const response = await post("/api/tts", { text: "Hello", voice: "jane", speed: 1 });
     assert.equal(response.status, 502);
     assert.equal((await response.json()).code, undefined);
   }
+  const post = await app(t, { synthesize: async () => new Response("provider-internal-details", { status: 429, headers: { "Retry-After": "1" } }) });
+  const response = await post("/api/tts", { text: "Hello", voice: "jane", speed: 1 });
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("Retry-After"), "1");
+  const problem = await response.json();
+  assert.equal(problem.code, "INFERENCE_BUSY");
+  assert.doesNotMatch(problem.error, /provider-internal-details/);
+});
+
+test("streaming waits for a busy inference service instead of failing, without showing startup", async t => {
+  const seen = [];
+  let server;
+  const reader = await streamingReader(t, { synthesizeChunk: undefined, synthesize: async (_endpoint, options) => {
+    const session = [...server.narrations.sessions.values()][0];
+    seen.push({ text: JSON.parse(options.body).text, warming: session.warming });
+    return seen.length === 1 ? new Response("busy", { status: 429, headers: { "Retry-After": "1" } })
+      : new Response(syntheticWav(), { headers: { "Content-Type": "audio/wav" } });
+  } });
+  server = reader.server;
+  const { id } = await (await reader.post("/api/streaming", { text: "Busy engine.", voice: "jane", speed: 1 })).json();
+  await server.narrations.sessions.get(id).done;
+  const status = await (await fetch(`${reader.base}/api/streaming/${id}/status`)).json();
+  assert.equal(status.state, "ready", status.error);
+  assert.deepEqual(seen, [{ text: "Busy engine.", warming: false }, { text: "Busy engine.", warming: false }]);
 });
 
 test("upstream errors and non-WAV responses become actionable API errors", async (t) => {

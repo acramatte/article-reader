@@ -33,10 +33,13 @@ export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthes
     });
     if (!upstream.ok) {
       await upstream.body?.cancel();
-      return new Response(JSON.stringify(upstream.status === 503
-        ? { code: "INFERENCE_UNAVAILABLE", error: "Speech engine is temporarily unavailable or starting up." }
-        : { error: `${config.name} returned HTTP ${upstream.status}.` }), {
-        status: upstream.status === 503 ? 503 : 502,
+      // Both statuses reject a request before synthesis starts, so callers may retry them.
+      const retryable = {
+        503: { code: "INFERENCE_UNAVAILABLE", error: "Speech engine is temporarily unavailable or starting up." },
+        429: { code: "INFERENCE_BUSY", error: `${config.name} is busy with other speech. Please try again shortly.` },
+      }[upstream.status];
+      return new Response(JSON.stringify(retryable || { error: `${config.name} returned HTTP ${upstream.status}.` }), {
+        status: retryable ? upstream.status : 502,
         headers: { "Content-Type": "application/json", "Retry-After": upstream.headers.get("Retry-After") || "2" },
       });
     }

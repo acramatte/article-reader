@@ -32,7 +32,7 @@ There is one Uvicorn worker. Inference is serialized across both models: at most
 
 The reader always requests `speed: 1`. Streaming narration applies the selected 0.5–2× speed in its FFmpeg MP3 encoder with the `atempo` filter, and divides generated-audio duration by the speed so progress and position accounting match the encoded tempo. The frontend speed choices are unchanged. The raw `/api/tts` WAV route rejects any speed other than 1. `atempo` changes tempo without changing pitch, but does not control the model's natural cadence or prosody.
 
-HTTP disconnect does not interrupt ongoing native Pocket TTS computation. A waiting request can also still generate after its client disconnects. This bounded overlap supports the reader's stop/restart flow but does not claim compute cancellation or public abuse protection. Authentication is supplied by the HF Protected endpoint, not this container; never expose the container directly as an unauthenticated public service. The reader backend still needs its own admission/rate policy for compromised VPN peers or multiple readers.
+HTTP disconnect does not interrupt ongoing native Pocket TTS computation. A waiting request can also still generate after its client disconnects. This bounded overlap supports the reader's stop/restart flow; when repeated stop/restart fills both slots, the reader retries the 429 within its per-chunk deadline. It does not claim compute cancellation or public abuse protection. Authentication is supplied by the HF Protected endpoint, not this container; never expose the container directly as an unauthenticated public service. The reader backend still needs its own admission/rate policy for compromised VPN peers or multiple readers.
 
 ## Local verification
 
