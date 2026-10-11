@@ -681,7 +681,7 @@ test("inference receives speech text while content and sentence ranges stay on t
   assert.deepEqual(sentences.map(([start, end]) => text.slice(start, end)),
     ["Elle finit 10e en 16 ms (https://example.fr/course?utm=1).", "La phrase suivante."]);
   await server.narrations.sessions.get(id).done;
-  assert.deepEqual(requests.map(request => request.text), ["Elle finit dixième en 16 millisecondes.", "La phrase suivante."]);
+  assert.deepEqual(requests.map(request => request.text), ["Elle finit dixième en seize millisecondes.", "La phrase suivante."]);
   const content = await (await fetch(`${base}/api/streaming/${id}/content`)).json();
   assert.equal(content.text, text);
   assert.deepEqual(content.sentences, sentences);

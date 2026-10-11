@@ -9,6 +9,7 @@
 !main.js
 !chunks.mjs
 !speech-text.mjs
+!number-words.mjs
 !tts-client.mjs
 !vite.config.js
 !server.mjs

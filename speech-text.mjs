@@ -1,5 +1,7 @@
+import { englishOrdinal, englishPlural, englishYear, frenchOrdinal, numberWords } from "./number-words.mjs";
+
 // Speech-only text preparation. Narrow, deterministic rewrites for expressions that speech models
-// misread (multiplier ranges, a few units, abbreviated months, French ordinals, URLs), applied in
+// misread (numbers, multiplier ranges, a few units, currencies, abbreviated months, ordinals, URLs), applied in
 // the narration language. The original text is never changed: the result maps every spoken
 // character back to the source range it stands for, so highlights address the displayed text.
 
@@ -22,44 +24,8 @@ const englishMonths = { Jan: "January", Feb: "February", Mar: "March", Apr: "Apr
 const frenchMonths = { janv: "janvier", févr: "février", fév: "février", avr: "avril", juil: "juillet", sept: "septembre",
   oct: "octobre", nov: "novembre", déc: "décembre" };
 
-const frenchUnits = ["zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze",
-  "treize", "quatorze", "quinze", "seize", "dix-sept", "dix-huit", "dix-neuf"];
-const frenchTens = ["", "", "vingt", "trente", "quarante", "cinquante", "soixante", "soixante", "quatre-vingt", "quatre-vingt"];
-
-function frenchBelow100(n) {
-  if (n < 20) return frenchUnits[n];
-  const ten = Math.floor(n / 10);
-  const rest = ten === 7 || ten === 9 ? n % 10 + 10 : n % 10;
-  if (!rest) return ten === 8 ? "quatre-vingts" : frenchTens[ten];
-  return `${frenchTens[ten]}${(rest === 1 || rest === 11) && ten < 8 ? " et " : "-"}${frenchUnits[rest]}`;
-}
-
-function frenchBelow1000(n) {
-  const hundreds = Math.floor(n / 100);
-  const rest = n % 100;
-  const head = hundreds === 0 ? "" : hundreds === 1 ? "cent" : `${frenchUnits[hundreds]} cent${rest ? "" : "s"}`;
-  return [head, rest ? frenchBelow100(rest) : ""].filter(Boolean).join(" ");
-}
-
-// Cardinal words for 1–9999 (traditional spelling: "vingt et un", "quatre-vingts", "deux cents").
-export function frenchCardinal(n) {
-  const thousands = Math.floor(n / 1000);
-  const rest = n % 1000;
-  const head = thousands === 0 ? "" : thousands === 1 ? "mille" : `${frenchBelow1000(thousands).replace(/cents$/, "cent")} mille`;
-  return [head, rest ? frenchBelow1000(rest) : ""].filter(Boolean).join(" ");
-}
-
-// "10e" → "dixième": the last word of the cardinal takes the ordinal suffix.
-export function frenchOrdinal(n) {
-  return frenchCardinal(n).replace(/[^\s-]+$/, word => {
-    if (word === "cinq") return "cinquième";
-    if (word === "neuf") return "neuvième";
-    return `${word.replace(/^(cent|vingt)s$/, "$1").replace(/e$/, "")}ième`;
-  });
-}
-
 function speakNumber(value, language) {
-  return language === "fr" ? value.replace(/\.(?=\d)/, ",") : value;
+  return numberWords(value, language) ?? value;
 }
 
 function speakHost(url, language) {
@@ -90,7 +56,8 @@ function urlEdits(text, language, edits) {
   for (const match of text.matchAll(/\[([^\]\n]+)\]\(((?:https?:\/\/|www\.)[^\s()]+(?:\([^\s()]*\)[^\s()]*)*)\)/giu)) {
     // A Markdown link keeps its label; a label that is itself a URL is spoken like one.
     const label = match[1].trim();
-    const speech = language in words && /^(?:https?:\/\/|www\.)\S+$/i.test(label) ? speakHost(label, language) : label;
+    const speech = language in words && /^(?:https?:\/\/|www\.)\S+$/i.test(label) ? speakHost(label, language)
+      : prepareSpeech(label, { language }).text;
     edits.add(match.index, match.index + match[0].length, speech);
   }
   for (const match of text.matchAll(/(?<![\p{L}\p{N}_@/.])(?:https?:\/\/|www\.(?=[\p{L}\p{N}]))[^\s<>"«»“”]+/giu)) {
@@ -136,23 +103,33 @@ function editor(length) {
   const claimed = new Uint8Array(length);
   const list = [];
   const free = (start, end) => !claimed.subarray(start, end).includes(1);
-  return { list, free, add(start, end, speech) {
-    if (!free(start, end)) return false;
-    claimed.fill(1, start, end);
-    list.push({ start, end, speech });
-    return true;
-  } };
+  return { list, free,
+    // Keep a range as written: no later rule may rewrite it.
+    keep(start, end) { claimed.fill(1, start, end); },
+    add(start, end, speech) {
+      if (!free(start, end)) return false;
+      claimed.fill(1, start, end);
+      list.push({ start, end, speech });
+      return true;
+    } };
 }
 
 function languageEdits(text, language, edits) {
   const { to, times, units } = words[language];
   const plural = value => language === "fr" ? Number(value.replace(",", ".")) >= 2 : value !== "1";
+  // Dates, IP addresses, versions, phone numbers and clock times stay as written:
+  // "2026-09-30", "30/09/2026", "192.168.1.1", "3.11.2", "555-123-4567", "10:30".
+  for (const match of text.matchAll(/(?<![\p{L}\p{N}_])\d+([-/.:])\d+(?:\1\d+)+(?![\p{L}\p{N}_])|(?<![\p{N}:])\d{1,2}:\d{2}(?![\p{N}])/gu)) {
+    edits.keep(match.index, match.index + match[0].length);
+  }
+  currencyEdits(text, language, edits);
   // "16 ms", "16ms", "10–20 ms": a time unit only after a number, in its exact case.
   const unit = new RegExp(String.raw`${before}(${number})(?:${space}?[-–]${space}?(${number}))?${space}?(ms|ns|µs|μs)(?!${alnum})`, "gu");
   for (const match of text.matchAll(unit)) {
     const [singular, many] = units[match[3] === "μs" ? "µs" : match[3]];
     const value = match[2] ?? match[1];
-    const amount = match[2] ? `${speakNumber(match[1], language)} ${to} ${speakNumber(match[2], language)}` : speakNumber(match[1], language);
+    let amount = match[2] ? `${speakNumber(match[1], language)} ${to} ${speakNumber(match[2], language)}` : speakNumber(match[1], language);
+    if (language === "fr") amount = amount.replace(/\bun$/, "une"); // "une milliseconde", "vingt et une millisecondes"
     edits.add(match.index, match.index + match[0].length, `${amount} ${match[2] || plural(value) ? many : singular}`);
   }
   // "2-3x", "2–3×", "10x": a multiplier directly after a number, never inside a token like "4x4" or "0x1f".
@@ -193,6 +170,78 @@ function languageEdits(text, language, edits) {
         else if (["ʳᵉ", "re", "ère"].includes(suffix)) edits.add(match.index, match.index + match[0].length, "première");
       } else if (["ème", "eme", "ᵉ", "e"].includes(suffix)) edits.add(match.index, match.index + match[0].length, frenchOrdinal(value));
     }
+  }
+  numberEdits(text, language, edits);
+}
+
+const currencyNames = {
+  en: { $: ["dollar", "dollars"], "€": ["euro", "euros"], "£": ["pound", "pounds"] },
+  fr: { $: ["dollar", "dollars"], "€": ["euro", "euros"], "£": ["livre", "livres"] },
+};
+const scaleLetters = { en: { K: "thousand", k: "thousand", M: "million", B: "billion" }, fr: { K: "mille", k: "mille", M: "millions", B: "milliards" } };
+
+function amountPattern(language) {
+  const grouped = language === "fr" ? String.raw`\d{1,3}(?:${space}\d{3})+(?!\d)` : String.raw`\d{1,3}(?:,\d{3})+(?!\d)`;
+  return String.raw`(?:${grouped}|\d+)(?:${language === "fr" ? "[.,]" : "\\."}\d+)?`;
+}
+
+// "$50" → "fifty dollars", "$1.5B" → "one point five billion dollars", "€2 million" → "two million euros",
+// "50 $" → "cinquante dollars". A spoken symbol before a number is otherwise dropped by the model.
+function currencyEdits(text, language, edits) {
+  const amount = amountPattern(language);
+  const scales = String.raw`thousand|million|billion|trillion|mille|millions?|milliards?`;
+  const pattern = new RegExp(String.raw`(?<![\p{L}\p{N}_])([$€£])${space}?(${amount})(?:([KkMB])|${space}+(${scales}))?(?![\p{L}\p{N}_])|(?<![\p{L}\p{N}_.,])(${amount})${space}?([$€£])(?![\p{L}\p{N}_])`, "gu");
+  for (const match of text.matchAll(pattern)) {
+    const symbol = match[1] ?? match[6];
+    const value = match[2] ?? match[5];
+    const spoken = numberWords(value, language);
+    if (!spoken) continue;
+    let scale = match[3] ? scaleLetters[language][match[3]] : match[4];
+    // "5 million $" → "cinq millions de dollars"; "1 M$" keeps the singular.
+    if (language === "fr" && scale) scale = scale.replace(/^(milli(?:on|ard))s?$/, Number(value.replace(",", ".")) >= 2 ? "$1s" : "$1");
+    const [singular, many] = currencyNames[language][symbol];
+    const name = !scale && value === "1" ? singular : many;
+    const of = language === "fr" && /^milli/.test(scale ?? "") ? "de " : ""; // "deux millions de dollars"
+    edits.add(match.index, match.index + match[0].length, [spoken, scale, `${of}${name}`].filter(Boolean).join(" "));
+  }
+}
+
+const monthNames = "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
+// English year context: "in 1999", "Sep 30, 2026", "30 September 2026", "2020–2024", "mid-1990s", "(2020)".
+const strongYear = new RegExp(String.raw`(?:\b(?:in|since|until|till|before|after|during|circa|year|early|late|as of|spring|summer|autumn|fall|winter)${space}+|\b(?:mid|pre|post)-|\b(?:${monthNames})\.?${space}+(?:\d{1,2}(?:st|nd|rd|th)?,?${space}+)?|\b\d{1,2}${space}+(?:${monthNames})\.?,?${space}+|\b(?:1[1-9]|20)\d\d${space}?[-–]${space}?|©${space}?)$`, "iu");
+
+function isYear(text, start, end, n) {
+  if (n < 1100 || n > 2099) return false;
+  const head = text.slice(Math.max(0, start - 40), start);
+  const tail = text.slice(end, end + 12);
+  if (strongYear.test(head) || new RegExp(String.raw`^${space}?[-–]${space}?(?:1[1-9]|20)\d\d(?!\d)`, "u").test(tail)) return true;
+  // Elsewhere ("from 2048 to 4096 tokens") the cardinal is always a valid reading.
+  return text[start - 1] === "(" && /^[),;]/.test(tail);
+}
+
+// Numbers as words: Pocket TTS reads "42" as "four two" and "3.5" as "three five". Identifiers keep
+// their digits: "Phi-3", "Llama-3-8B", "COVID-19", "H100", "4090Ti", "1e-5", "x86".
+function numberEdits(text, language, edits) {
+  const suffixes = language === "fr" ? String.raw`%|[KkMB]|[KMGT][oB]|ko|kB|[kMG]Hz|fps`
+    : String.raw`st|nd|rd|th|s|%|[KkMB]|[KMGT]B|kB|[kMG]Hz|fps`;
+  const pattern = new RegExp(String.raw`(?<![\p{L}\p{N}_.,/:'’#@$€£¥])(${amountPattern(language)})(${suffixes})?(?![\p{L}\p{N}_])(?![.,:/]\d)`, "gu");
+  for (const match of text.matchAll(pattern)) {
+    const [all, raw, suffix = ""] = match;
+    const start = match.index;
+    const end = start + all.length;
+    const head = text.slice(Math.max(0, start - 40), start);
+    if (/[\p{L}_][\p{L}\p{N}_.,–-]*[-–]$/u.test(head) && !/(?:^|[^\p{L}])(?:mid|pre|post)-$/iu.test(head)) continue;
+    if (language === "fr" && raw === "1" && !suffix) continue; // "un" or "une": the gender is unknown.
+    const integer = /^\d+$/.test(raw) ? Number(raw) : null;
+    let spoken;
+    if (["st", "nd", "rd", "th"].includes(suffix)) spoken = integer === null ? null : englishOrdinal(integer);
+    else if (suffix === "s") spoken = integer >= 1100 && integer <= 2090 && integer % 10 === 0 ? englishPlural(englishYear(integer)) : null; // "1990s"
+    else if (language === "en" && integer !== null && raw.length === 4 && !suffix && isYear(text, start, end, integer)) spoken = englishYear(integer);
+    else {
+      spoken = numberWords(raw, language);
+      if (spoken && suffix) spoken += suffix === "%" ? "%" : ` ${suffix}`;
+    }
+    if (spoken) edits.add(start, end, spoken);
   }
 }
 

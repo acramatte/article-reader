@@ -27,7 +27,7 @@ test("chunking keeps all text, respects first/regular limits, and preserves para
 
 test("chunking skips punctuation-only paragraphs and fragments, preserving speech text and its punctuation", () => {
   assert.deepEqual(chunkText("«»“”()[]\n\n«L’été arrive !»\n\n***\n\n2026\n\n漢字\n\n١٢"),
-    ["«L’été arrive !»", "2026", "漢字", "١٢"]);
+    ["«L’été arrive !»", "two thousand twenty-six", "漢字", "١٢"]);
   const fragments = chunkText("-".repeat(20) + "«Salut.»" + "-".repeat(30), { firstLimit: 10, limit: 10 });
   assert.ok(fragments.every(chunk => /[\p{L}\p{N}]/u.test(chunk) && chunk.length <= 10));
   assert.equal(fragments.join("").replaceAll("-", ""), "«Salut.»");
