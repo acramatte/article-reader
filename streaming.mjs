@@ -5,9 +5,13 @@ import { mkdir, mkdtemp, open, readdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
-import { chunkText } from "./chunks.mjs";
+import { planNarration } from "./chunks.mjs";
 
 const terminal = state => ["ready", "error", "stopped"].includes(state);
+// Each sentence also carries a pause, so a short one takes longer than its length alone suggests.
+// Estimated sentence times add this many characters per sentence; calibrated on Pocket TTS output.
+const sentencePauseChars = 12;
+const milliseconds = seconds => Math.round(seconds * 1000) / 1000;
 
 // WAV containers cannot be concatenated. Admit only the inference service's actual PCM contract.
 export function pcmFromWav(bytes) {
@@ -115,8 +119,9 @@ export class StreamingNarrations {
     try { process.kill(pid, 0); return true; } catch (error) { return error.code !== "ESRCH"; }
   }
 
-  async createSession({ text, voice, speed, title = "", byline = "", sourceUrl = "", paceSeconds = 0 }) {
-    const chunks = chunkText(text);
+  async createSession({ text, voice, speed, language = "en", title = "", byline = "", sourceUrl = "", paceSeconds = 0 }) {
+    const plan = planNarration(text, { language });
+    const chunks = plan.chunks.map(chunk => chunk.text);
     if (!chunks.length) throw Object.assign(new Error("Narration requires at least one letter or number."), { status: 400 });
     await (this.spoolReady ??= this.prepareSpool());
     if (this.closed) throw Object.assign(new Error("Narration server is shutting down."), { status: 503 });
@@ -132,6 +137,9 @@ export class StreamingNarrations {
     await file.close();
     const session = { id: randomUUID(), directory, path, voice, speed, paceSeconds, text, title, byline, sourceUrl,
       chunks, controller: new AbortController(), state: "generating", warming: false,
+      // Sentence source ranges, the sentences of each chunk, and [start, end] recording seconds as generated.
+      sentences: plan.sentences.map(({ start, end }) => [start, end]), sentenceLengths: plan.sentences.map(s => s.length),
+      chunkSentences: plan.chunks.map(chunk => chunk.sentences), timings: [],
       generated: 0, bytes: 0, audioSecondsGenerated: 0, startedAt: Date.now(), consumers: 0, firstByteSeconds: null,
       subscribers: new Set() };
     this.sessions.set(session.id, session);
@@ -176,7 +184,22 @@ export class StreamingNarrations {
     session.statusTimer = null;
     if (!session.subscribers.size) return;
     const snapshot = this.snapshot(session);
-    for (const send of session.subscribers) send(snapshot);
+    for (const send of session.subscribers) send("status", snapshot);
+  }
+
+  // Split a chunk's exact duration across its sentences by length, from `start` recording seconds.
+  timeChunk(session, chunk, start, seconds) {
+    const sentences = session.chunkSentences[chunk];
+    const weights = sentences.map(sentence => session.sentenceLengths[sentence] + sentencePauseChars);
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    let end = start;
+    const timings = weights.map(weight => {
+      const begin = end;
+      end += seconds * weight / total;
+      return [milliseconds(begin), milliseconds(end)];
+    });
+    session.timings.push(...timings);
+    for (const send of session.subscribers) send("timing", { from: sentences[0], timings });
   }
 
   events(session, response) {
@@ -201,8 +224,8 @@ export class StreamingNarrations {
       }
       return true;
     };
-    const send = snapshot => {
-      if (write(`event: status\ndata: ${JSON.stringify(snapshot)}\n\n`) && terminal(snapshot.state)) {
+    const send = (event, data) => {
+      if (write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`) && event === "status" && terminal(data.state)) {
         cleanup();
         response.end();
       }
@@ -211,8 +234,9 @@ export class StreamingNarrations {
     session.subscribers.add(send);
     heartbeat = setInterval(() => write(": heartbeat\n\n"), 15_000);
     heartbeat.unref();
-    // No replay log is needed: every connection starts with the current state.
-    send(this.snapshot(session));
+    // No replay log is needed: every connection starts with the known timings and current state.
+    if (session.timings.length) send("timing", { from: 0, timings: session.timings });
+    send("status", this.snapshot(session));
   }
 
   armDisconnect(session) {
@@ -263,7 +287,7 @@ export class StreamingNarrations {
       signal.throwIfAborted();
       output = this.collectOutput(session, encoder);
       output.catch(error => { session.outputError = error; session.controller.abort(); encoder.kill("SIGKILL"); });
-      for (const text of session.chunks) {
+      for (const [chunk, text] of session.chunks.entries()) {
         if (session.generated && session.paceSeconds) await delay(session.paceSeconds * 1000, undefined, { signal });
         signal.throwIfAborted();
         const wav = await this.synthesizeChunk({ text, voice: session.voice, speed: 1 }, signal,
@@ -274,7 +298,9 @@ export class StreamingNarrations {
         const pcm = pcmFromWav(wav);
         await new Promise((resolve, reject) => encoder.stdin.write(pcm, error => error ? reject(error) : resolve()));
         session.generated++;
-        session.audioSecondsGenerated += pcm.length / 48_000 / session.speed;
+        const seconds = pcm.length / 48_000 / session.speed;
+        this.timeChunk(session, chunk, session.audioSecondsGenerated, seconds);
+        session.audioSecondsGenerated += seconds;
         this.publish(session);
       }
       encoder.stdin.end();

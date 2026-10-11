@@ -46,7 +46,11 @@ test("normal reader exposes streaming content/audio/status/mark/stop and non-sec
   for (const key of ["voice", "speed", "title"]) assert.equal(snapshot[key], body[key]);
   assert.equal(snapshot.text, undefined); assert.equal(snapshot.byline, undefined);
   assert.ok(snapshot.expiresAt > Date.now()); assert.equal(snapshot.generationDeadline, null);
-  assert.deepEqual(await (await fetch(base + `/api/streaming/${id}/content`)).json(), body);
+  const { sentences, timings, ...content } = await (await fetch(base + `/api/streaming/${id}/content`)).json();
+  assert.deepEqual(content, body);
+  // One sentence, timed in recording seconds (synthesis duration divided by speed).
+  assert.deepEqual(sentences, [[0, body.text.length]]);
+  assert.deepEqual(timings, [[0, Math.round(snapshot.audioSecondsGenerated * 1000) / 1000]]);
   const audio = await fetch(base + audioUrl);
   assert.equal(audio.headers.get("content-type"), "audio/mpeg");
   assert.ok((await audio.arrayBuffer()).byteLength > 0);
@@ -119,7 +123,10 @@ test("escaped maximum metadata fits the body bound alongside maximum narration t
   assert.equal(response.status, 201);
   const { id } = await response.json();
   await server.narrations.sessions.get(id).done;
-  assert.deepEqual(await (await fetch(`${base}/api/streaming/${id}/content`)).json(), content);
+  const { sentences, timings, ...restored } = await (await fetch(`${base}/api/streaming/${id}/content`)).json();
+  assert.deepEqual(restored, content);
+  assert.deepEqual(sentences, [[0, 20]]);
+  assert.equal(timings.length, 1);
 });
 
 test("stream environment overrides reject malformed, nonpositive and unreasonable limits", () => {
@@ -166,14 +173,14 @@ test("API extracts article and proxies WAV and metrics, sending token only upstr
 
 for (const [ttsEngine, name, catalog, foreignVoices] of [
   ["pocket", "Pocket TTS", [
-    { id: "jane", name: "Jane", group: "American English · Female" },
-    { id: "bill_boerst", name: "Bill Boerst", group: "American English · Male" },
-    { id: "estelle", name: "Estelle", group: "French · Female" },
+    { id: "jane", name: "Jane", group: "American English · Female", language: "en" },
+    { id: "bill_boerst", name: "Bill Boerst", group: "American English · Male", language: "en" },
+    { id: "estelle", name: "Estelle", group: "French · Female", language: "fr" },
   ], ["af_heart", "am_michael", "ff_siwis"]],
   ["kokoro", "Kokoro", [
-    { id: "af_heart", name: "Heart", group: "American English · Female" },
-    { id: "am_michael", name: "Michael", group: "American English · Male" },
-    { id: "ff_siwis", name: "Siwis", group: "French · Female" },
+    { id: "af_heart", name: "Heart", group: "American English · Female", language: "en" },
+    { id: "am_michael", name: "Michael", group: "American English · Male", language: "en" },
+    { id: "ff_siwis", name: "Siwis", group: "French · Female", language: "fr" },
   ], ["jane", "bill_boerst", "estelle"]],
 ]) test(`both speech APIs use the ${ttsEngine} catalog and reject foreign voices`, async t => {
   const seen = [];

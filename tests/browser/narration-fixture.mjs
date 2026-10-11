@@ -32,8 +32,9 @@ function syntheticWav(seconds) {
 }
 
 export async function mockNarration(page, { seconds = 12, state = "ready", generated = 1, total = 1,
-  warming = false, mediaGate, stopGate, statusGate, admissionGate } = {}) {
-  const fixture = { requests: [], stops: [], contentReads: [], mediaReads: [], statusReads: [], sessions: new Map(),
+  warming = false, mediaGate, stopGate, statusGate, admissionGate, sentences, timings } = {}) {
+  // `sentences`/`timings` are synthetic too: given offsets and times, not derived from the audio.
+  const fixture = { sentences, timings, requests: [], stops: [], contentReads: [], mediaReads: [], statusReads: [], sessions: new Map(),
     status: { state, generated, total, warming }, statusCode: 200, admissionError: null,
     mediaGate, stopGate, statusGate, admissionGate };
   // Playwright fulfill buffers entire responses. Use a real HTTP stream so native
@@ -41,6 +42,7 @@ export async function mockNarration(page, { seconds = 12, state = "ready", gener
   const observers = new Set();
   fixture.eventReads = [];
   const send = response => {
+    if (fixture.timings) response.write(`event: timing\ndata: ${JSON.stringify({ from: 0, timings: fixture.timings })}\n\n`);
     response.write(`event: status\ndata: ${JSON.stringify(fixture.status)}\n\n`);
     if (["ready", "error", "stopped"].includes(fixture.status.state)) response.end();
   };
@@ -84,7 +86,7 @@ export async function mockNarration(page, { seconds = 12, state = "ready", gener
       const id = randomUUID();
       fixture.sessions.set(id, content);
       fixture.id = id;
-      return route.fulfill({ status: 201, json: { id } });
+      return route.fulfill({ status: 201, json: { id, ...(fixture.sentences ? { sentences: fixture.sentences } : {}) } });
     }
     const [, id, action] = path.match(/^\/api\/streaming\/([^/]+)\/(status|events|content|audio|stop)$/) || [];
     if (action === "events") return route.continue({ url: `http://127.0.0.1:${eventServer.address().port}${path}` });
@@ -96,7 +98,8 @@ export async function mockNarration(page, { seconds = 12, state = "ready", gener
     }
     if (action === "content") {
       fixture.contentReads.push(id);
-      return route.fulfill({ json: fixture.sessions.get(id) });
+      return route.fulfill({ json: { ...fixture.sessions.get(id),
+        ...(fixture.sentences ? { sentences: fixture.sentences, timings: fixture.timings } : {}) } });
     }
     if (action === "stop") {
       fixture.stops.push(id);

@@ -32,7 +32,8 @@ export function createApp({
   ...streamingOptions
 } = {}) {
   const provider = speechProvider({ ttsEngine, ttsUrl, ttsToken, synthesize });
-  const voices = new Set(provider.config.voices.map(voice => voice.id));
+  // Voice ID → language, for sentence segmentation.
+  const voices = new Map(provider.config.voices.map(voice => [voice.id, voice.language]));
   const streaming = createStreamingApi({ ...streamingOptions, voices,
     synthesizeChunk: synthesizeChunk || provider.synthesizeChunk }, readJson);
   const server = http.createServer(async (request, response) => {

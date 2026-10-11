@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { once } from "node:events";
 import { validateUrl, isPublicAddress, publicTarget, fetchArticleHtml, extractArticle, requestPage } from "../article.mjs";
-import { chunkText } from "../chunks.mjs";
+import { chunkText, planNarration } from "../chunks.mjs";
 import { html, paragraphs } from "./fixture.mjs";
 
 test("Readability extracts paragraphs without menus, ads, or scripts", () => {
@@ -32,6 +32,26 @@ test("chunking skips punctuation-only paragraphs and fragments, preserving speec
   assert.ok(fragments.every(chunk => /[\p{L}\p{N}]/u.test(chunk) && chunk.length <= 10));
   assert.equal(fragments.join("").replaceAll("-", ""), "«Salut.»");
   assert.deepEqual(chunkText("  «»“”()[] — *** 🎵 \n\n ... "), []);
+});
+
+test("narration plan maps every chunk to whole sentences given as source ranges", () => {
+  const text = "  Mr. Smith met J. K. Rowling.\nShe   waved!  \"Hello?\" ***\n\n***\n\nOui ? Non.\n\n" +
+    `${"word ".repeat(120).trim()}. ${"x".repeat(600)}`;
+  const { sentences, chunks } = planNarration(text, { language: "fr" });
+  const slices = sentences.map(({ start, end }) => text.slice(start, end));
+  assert.deepEqual(slices.slice(0, 5), ["Mr. Smith met J. K. Rowling.", "She   waved!", "\"Hello?\" ***", "Oui ?", "Non."]);
+  sentences.forEach(({ start, end, length }, i) => {
+    assert.ok(i === 0 || start >= sentences[i - 1].end, "sentences are ordered and disjoint");
+    assert.equal(length, slices[i].replace(/\s+/g, " ").length);
+  });
+  // Chunk text is exactly its sentences, single-spaced; sentence indexes run in order across chunks.
+  assert.deepEqual(chunks.flatMap(chunk => chunk.sentences), sentences.map((_, i) => i));
+  for (const chunk of chunks) assert.equal(chunk.text, chunk.sentences.map(i => slices[i].replace(/\s+/g, " ")).join(" "));
+  chunks.forEach((chunk, i) => assert.ok(chunk.text.length <= (i === 0 ? 220 : 500)));
+  // A sentence longer than a chunk becomes several sentences, split at words, then hard.
+  assert.ok(slices.filter(slice => slice.startsWith("word")).length > 1);
+  assert.equal(slices.filter(slice => /^x+$/.test(slice)).join(""), "x".repeat(600));
+  assert.deepEqual(planNarration("«»\n\n— ***"), { sentences: [], chunks: [] });
 });
 
 test("URL and IP validation rejects SSRF targets, credentials, schemes, and ports", async () => {
