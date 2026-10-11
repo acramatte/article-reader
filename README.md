@@ -150,6 +150,26 @@ The browser suite starts dedicated servers on UI port 5197 and backend port 3017
 
 Tests require the local Pocket TTS service and internet access to `https://www.paulgraham.com/greatwork.html` for real article/audio checks. They cover native continuous MP3 playback, reload recovery without new synthesis, playback controls, completion, URL-first layout, extraction errors, manual fallback, editing/re-reading without re-extraction, keyboard access and responsive/reduced-motion behavior. Layout/startup/control fixtures are explicitly synthetic; real-provider tests separately exercise Pocket TTS and native MP3 playback. Headless checks don't establish narration quality or reliable background playback on physical phones.
 
+### Manual pronunciation regression check
+
+With the **real Pocket TTS service** running (setup above), use Node, FFmpeg and Python to compare speech with handwritten references. This slow, local tool is **not CI**. Install Whisper in the service venv, then run:
+
+```sh
+uv pip install --python pocket-tts-service/.venv/bin/python faster-whisper==1.2.1
+node scripts/pronunciation.mjs --baseline \
+  --python pocket-tts-service/.venv/bin/python --out /tmp/pronunciation-run
+```
+
+Whisper downloads `small` on first use (`--model <local-directory>` uses staged weights). Run one check at a time on small machines.
+Both decodes prepend 0.5 seconds of silence to each WAV's decoded audio to reduce clipped opening words; retained WAVs remain unchanged.
+
+`--cases tests/fixtures/pronunciation.json` selects a JSON array of `{id, language, text, reference}`: unique lowercase slug IDs, `en`/`fr`, and independent references written as **spoken words**, never derived from preparation. Prepared synthesis uses `planNarration`; `--baseline` also sends original text verbatim (maximum 1,000 characters). Scoring joins letter runs and expands known transcript abbreviations.
+
+Digit-suppressed ASR is the default gate, preventing number formatting from hiding misreadings. Optional per-case `"asr": "unsuppressed"` always adds ordinary ASR and scores it after verbalizing its digits with `numberWords` in that language. Use this for known decoder failures: suppression hallucinates French dates/years; only `fr-date` opts in among the seeds. `--asr-diagnostic` retains an ordinary decoding for other cases without changing their gate. Neither pass is prompted with the reference.
+
+Default `--samples 3` (minimum two) reports median/mean/min/max WER and gates on the median: with three samples, at least two must exceed the threshold to fail. Even sample counts use the average of the two middle scores. Exit **0**: all prepared medians ≤ `--threshold 0.2`; **1**: a prepared median exceeds it; **2**: tool/setup error. Raw baselines never gate. New output directories retain WAVs, exact texts, transcripts, settings and `report.json`; existing directories are refused. **WER is triage, not phonetic proof**: Pocket sampling and ASR spelling/hallucinations vary. Listen to retained failed/outlier clips before changing rules; unsuppressed ASR can conceal number errors.
+English brand names in French voices are out of scope.
+
 
 ## Locked-screen playback and diagnostic page
 
