@@ -8,6 +8,7 @@
 !public/**
 !main.js
 !chunks.mjs
+!speech-text.mjs
 !tts-client.mjs
 !vite.config.js
 !server.mjs

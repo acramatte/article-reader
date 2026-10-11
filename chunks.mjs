@@ -1,4 +1,6 @@
-const speech = /[\p{L}\p{N}]/u;
+import { prepareSpeech } from "./speech-text.mjs";
+
+const spoken = /[\p{L}\p{N}]/u;
 const space = /\s/;
 // Intl.Segmenter has no abbreviation suppressions: keep "Mr. Smith" and "J. K. Rowling" together.
 const title = /(?:^|[\s(«“"'])(?:Mr|Mrs|Ms|Dr|Prof|St|Sr|Jr|Mt|Mme|Mlle|Mgr|\p{Lu})\.$/u;
@@ -32,14 +34,16 @@ function normalized(text, start, end) {
   return { value, index };
 }
 
-// Sentences are the highlight units: source ranges of `text`, in narration order. Chunks are the
-// synthesis requests: whole sentences packed up to the limits, never across paragraphs. The first
-// request stays small. A sentence longer than a chunk is split at words (or hard), and each piece
-// becomes its own sentence. Punctuation-only fragments stay with a neighbor or are not narrated.
-export function planNarration(text, { language = "en", firstLimit = 220, limit = 500 } = {}) {
+// Sentences are the highlight units: source ranges of `original`, in narration order, with their
+// spoken length. Chunks are the synthesis requests: whole sentences of the speech text (see
+// speech-text.mjs) packed up to the limits, never across paragraphs. The first request stays small.
+// A sentence longer than a chunk is split at words (or hard), and each piece becomes its own
+// sentence. Punctuation-only fragments stay with a neighbor or are not narrated.
+export function planNarration(original, { language = "en", firstLimit = 220, limit = 500 } = {}) {
   if (!Number.isInteger(firstLimit) || !Number.isInteger(limit) || firstLimit < 1 || limit < 1) {
     throw new Error("Chunk limits must be positive integers.");
   }
+  const { text, source } = prepareSpeech(original, { language });
   const segmenter = new Intl.Segmenter(language, { granularity: "sentence" });
   const sentences = [];
   const chunks = [];
@@ -47,8 +51,9 @@ export function planNarration(text, { language = "en", firstLimit = 220, limit =
   const capacity = () => chunks.length === 0 ? firstLimit : limit;
   const flush = () => { if (current) chunks.push(current); current = null; };
   const add = (start, end, value) => {
-    if (!speech.test(value)) return;
+    if (!spoken.test(value)) return;
     if (current && current.text.length + 1 + value.length > capacity()) flush();
+    [start, end] = source(start, end);
     sentences.push({ start, end, length: value.length });
     if (current) {
       current.text += ` ${value}`;
@@ -62,7 +67,7 @@ export function planNarration(text, { language = "en", firstLimit = 220, limit =
       const range = trimmed(text, start + index, start + index + segment.length);
       if (range[0] === range[1]) continue;
       const previous = ranges.at(-1);
-      if (previous && (!speech.test(text.slice(...range)) || !speech.test(text.slice(...previous)) ||
+      if (previous && (!spoken.test(text.slice(...range)) || !spoken.test(text.slice(...previous)) ||
           title.test(text.slice(...previous)))) previous[1] = range[1];
       else ranges.push(range);
     }

@@ -671,6 +671,28 @@ test("punctuation-only separators do not become speech requests or lose original
   assert.ok(Math.abs(samples.length / 24_000 - 12) < 0.15, "four 3-second speech chunks, no separator audio");
 });
 
+test("inference receives speech text while content and sentence ranges stay on the original text", async t => {
+  const requests = [];
+  const { base, post, server } = await app(t, { synthesizeChunk: async body => { requests.push(body); return wav(1); } });
+  const text = "Elle finit 10e en 16 ms (https://example.fr/course?utm=1).\n\nhttps://example.fr/ref\n\nLa phrase suivante.";
+  const created = await post("/api/streaming", { text, voice: "estelle", speed: 1 });
+  assert.equal(created.status, 201);
+  const { id, sentences } = await created.json();
+  assert.deepEqual(sentences.map(([start, end]) => text.slice(start, end)),
+    ["Elle finit 10e en 16 ms (https://example.fr/course?utm=1).", "La phrase suivante."]);
+  await server.narrations.sessions.get(id).done;
+  assert.deepEqual(requests.map(request => request.text), ["Elle finit dixième en 16 millisecondes.", "La phrase suivante."]);
+  const content = await (await fetch(`${base}/api/streaming/${id}/content`)).json();
+  assert.equal(content.text, text);
+  assert.deepEqual(content.sentences, sentences);
+  assert.equal(content.timings.length, 2);
+  // Nothing remains to say once reference links are skipped: a clear rejection, before inference.
+  const links = await post("/api/streaming", { text: "https://example.com/a?b=1\n\n- https://example.org/c", voice: "jane", speed: 1 });
+  assert.equal(links.status, 400);
+  assert.match((await links.json()).error, /only contains links/);
+  assert.equal(requests.length, 2);
+});
+
 test("concurrent creation cannot bypass single-generation admission", async (t) => {
   const { post } = await app(t, { synthesizeChunk: async (body, signal) => {
     await delay(10_000, undefined, { signal }); return wav();

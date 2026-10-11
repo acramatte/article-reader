@@ -122,7 +122,11 @@ export class StreamingNarrations {
   async createSession({ text, voice, speed, language = "en", title = "", byline = "", sourceUrl = "", paceSeconds = 0 }) {
     const plan = planNarration(text, { language });
     const chunks = plan.chunks.map(chunk => chunk.text);
-    if (!chunks.length) throw Object.assign(new Error("Narration requires at least one letter or number."), { status: 400 });
+    if (!chunks.length) {
+      // Reference URLs are not narrated, so text can have letters and still nothing to say.
+      throw Object.assign(new Error(/[\p{L}\p{N}]/u.test(text) ? "Nothing to narrate: the text only contains links."
+        : "Narration requires at least one letter or number."), { status: 400 });
+    }
     await (this.spoolReady ??= this.prepareSpool());
     if (this.closed) throw Object.assign(new Error("Narration server is shutting down."), { status: 503 });
     if (this.sessions.size >= this.maxSessions) {
