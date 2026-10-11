@@ -60,7 +60,7 @@ export function createStreamingApi(options, readJson) {
     if (!session) { json(404, { error: "Streaming session expired or does not exist." }); return true; }
     const action = route[2];
     if (request.method === "GET" && action === "status") json(200, narrations.snapshot(session));
-    else if (request.method === "GET" && action === "events") narrations.events(session, response);
+    else if (request.method === "GET" && action === "events") await narrations.events(session, response);
     else if (request.method === "GET" && action === "content") {
       if (session.text === null) json(410, { error: "Narration content is no longer available." });
       else json(200, { text: session.text, title: session.title, byline: session.byline, sourceUrl: session.sourceUrl,
