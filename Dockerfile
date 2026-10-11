@@ -3,7 +3,7 @@ FROM node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea41952009
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --include=dev
-COPY index.html main.js stream-player.mjs vite.config.js ./
+COPY index.html main.js stream-player.mjs narration-highlight.mjs vite.config.js ./
 COPY public/ ./public/
 RUN npm run build
 
