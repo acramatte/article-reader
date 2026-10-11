@@ -4,9 +4,12 @@ This image redistributes Kyutai's Pocket TTS non-voice-cloning checkpoints and
 precomputed voice states. The weights are licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 Source: https://huggingface.co/kyutai/pocket-tts-without-voice-cloning.
-The bundled README contains the model card and prohibited-use notice;
-assets.json records the distributed files' hashes. We rewrite configuration
-paths for offline use and dynamically quantize the models at startup.
+The bundled README contains the model card and prohibited-use notice.
+assets.json traces each bundled file to its Hugging Face repository, path,
+exact commit and SHA-256, with the license from the model card at that commit
+and, for voice states, the source recording listed in the shipped model card.
+We rewrite configuration paths for offline use (recorded in assets.json) and
+dynamically quantize the models at startup.
 
 Voice states are Kyutai's derivatives of these recordings:
 
