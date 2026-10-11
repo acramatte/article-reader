@@ -4,14 +4,14 @@ const transportCodes = new Set(["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "E
 
 const engines = {
   pocket: { name: "Pocket TTS", voices: [
-    { id: "jane", name: "Jane", group: "American English · Female" },
-    { id: "bill_boerst", name: "Bill Boerst", group: "American English · Male" },
-    { id: "estelle", name: "Estelle", group: "French · Female" },
+    { id: "jane", name: "Jane", group: "American English · Female", language: "en" },
+    { id: "bill_boerst", name: "Bill Boerst", group: "American English · Male", language: "en" },
+    { id: "estelle", name: "Estelle", group: "French · Female", language: "fr" },
   ] },
   kokoro: { name: "Kokoro", voices: [
-    { id: "af_heart", name: "Heart", group: "American English · Female" },
-    { id: "am_michael", name: "Michael", group: "American English · Male" },
-    { id: "ff_siwis", name: "Siwis", group: "French · Female" },
+    { id: "af_heart", name: "Heart", group: "American English · Female", language: "en" },
+    { id: "am_michael", name: "Michael", group: "American English · Male", language: "en" },
+    { id: "ff_siwis", name: "Siwis", group: "French · Female", language: "fr" },
   ] },
 };
 

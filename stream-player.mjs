@@ -2,9 +2,12 @@ const validId = id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-
 
 // The native media element owns playback; SSE is diagnostics/recovery only.
 export class StreamingPlayer {
-  constructor({ audio, bookmarkReady, onUpdate, onRestore = () => {}, fetchImpl = fetch,
+  constructor({ audio, bookmarkReady, onUpdate, onRestore = () => {}, onTimeline = () => {}, fetchImpl = fetch,
     eventSource = url => new EventSource(url), now = () => performance.now() }) {
-    Object.assign(this, { audio, onUpdate, onRestore, fetchImpl, eventSource, now });
+    Object.assign(this, { audio, onUpdate, onRestore, onTimeline, fetchImpl, eventSource, now });
+    // Sentence [start, end] text offsets, and [start, end] recording seconds for those generated so far.
+    this.sentences = [];
+    this.timings = [];
     this.controller = new AbortController();
     this.statusRevision = 0;
     this.ready = bookmarkReady.then(bookmark => { this.bookmark = bookmark; });
@@ -120,6 +123,7 @@ export class StreamingPlayer {
       if (this.controller.signal.aborted) return;
       if (!validId(result.id)) throw new Error("The server returned an invalid recording identifier.");
       this.id = result.id;
+      this.setTimeline(result.sentences);
       this.savePosition(true);
       this.audio.preload = "auto";
       this.audio.src = `/api/streaming/${this.id}/audio`;
@@ -151,6 +155,11 @@ export class StreamingPlayer {
   connectStatus() {
     if (this.events || !this.id || this.controller.signal.aborted || ["ready", "error", "stopped"].includes(this.snapshot?.state)) return;
     const events = this.events = this.eventSource(`/api/streaming/${this.id}/events`);
+    events.addEventListener("timing", event => {
+      if (this.events !== events || this.controller.signal.aborted) return;
+      const { from, timings } = JSON.parse(event.data);
+      this.setTimeline(undefined, timings, from);
+    });
     events.addEventListener("status", event => {
       if (this.events !== events || this.controller.signal.aborted) return;
       this.snapshotTask = this.applySnapshot(JSON.parse(event.data));
@@ -164,6 +173,12 @@ export class StreamingPlayer {
       // closes it; inspect the JSON endpoint once for an actionable expiry/error.
       if (events.readyState === 2) { this.closeStatus(); void this.refresh({ reconnect: false }); }
     };
+  }
+
+  setTimeline(sentences, timings = [], from = 0) {
+    if (Array.isArray(sentences)) this.sentences = sentences;
+    if (Array.isArray(timings)) timings.forEach((timing, i) => { this.timings[from + i] = timing; });
+    this.onTimeline();
   }
 
   closeStatus() {
@@ -211,7 +226,11 @@ export class StreamingPlayer {
         if (!this.contentRestored) {
           const content = await (this.contentTask ??= this.json(`/api/streaming/${this.id}/content`));
           if (this.controller.signal.aborted) return;
-          if (!this.contentRestored) { this.onRestore(content); this.contentRestored = true; }
+          if (!this.contentRestored) {
+            this.onRestore(content);
+            this.contentRestored = true;
+            this.setTimeline(content.sentences, content.timings);
+          }
         }
         const complete = this.snapshot.state === "ready";
         this.recoveryPhase = complete || this.snapshot.audioSecondsGenerated >= this.recovery.positionSeconds

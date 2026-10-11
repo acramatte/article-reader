@@ -1,4 +1,5 @@
 import { StreamingPlayer } from "./stream-player.mjs";
+import { NarrationHighlight } from "./narration-highlight.mjs";
 import { PlaybackBookmark } from "./public/streaming-state.js";
 import { loadTtsSettings } from "./public/tts-settings.js";
 
@@ -16,6 +17,32 @@ let source = "url";
 let hasReadText = false;
 let sessionHasText = false;
 let pauseAnimations = [];
+const highlight = new NarrationHighlight({ container: $("#article-body"), audio: $("#narration-audio"),
+  position: () => narrator?.position() ?? 0 });
+
+// The article panel always shows exactly the narrated text: sentence offsets address its text node.
+// Pasted text has no title, byline or source of its own.
+function showNarratedText(text, article = null) {
+  const panel = $("#article-panel");
+  if (article) {
+    panel.dataset.source = "url";
+    setText($("#article-title"), article.title);
+    setText($("#byline"), article.byline);
+    setText($("#source"), article.url);
+    $("#source").href = article.url;
+  } else if (panel.dataset.source !== "url") {
+    panel.dataset.source = "text";
+    setText($("#article-title"), "Pasted text");
+  }
+  for (const element of [$("#byline"), $("#source").parentElement]) element.hidden = panel.dataset.source !== "url";
+  setText($("#article-body"), text);
+  panel.hidden = false;
+  setText($("#editor-summary"), "Edit article text");
+}
+
+function hasArticle() {
+  return !$("#article-panel").hidden && $("#article-panel").dataset.source === "url";
+}
 
 function renderSource() {
   // Keep the same URL input mounted and focusable throughout the reveal.
@@ -88,6 +115,8 @@ function playbackLabel(update) {
 function render(update) {
   $("#listening-card").hidden = false;
   active = !["stopped", "finished", "error"].includes(update.state);
+  if (active) highlight.update(); // Player updates include recovery offset changes, not only media events.
+  else highlight.clear();
   if (!active && sessionHasText) source = "text";
   const hasPlayback = active || sessionHasText || source === "text";
   for (const id of ["#playback", "#listen-title"]) {
@@ -140,9 +169,20 @@ function read(fromUrl) {
   const speed = Number($("#speed").value);
   try {
     narrator?.dispose();
+    highlight.clear();
+    let narrated = input;
     const session = new StreamingPlayer({
       audio: $("#narration-audio"), bookmarkReady,
       onUpdate: (update) => { if (narrator === session) render(update); },
+      onTimeline: () => {
+        if (narrator !== session) return;
+        // Pasted text moves from the editor to the article panel once the narration is accepted.
+        if ($("#article-panel").hidden || $("#article-body").textContent !== narrated) {
+          showNarratedText(narrated);
+          $("#editor").open = false;
+        }
+        highlight.setTimeline(session.sentences, session.timings);
+      },
     });
     const trigger = document.activeElement;
     narrator = session;
@@ -159,22 +199,17 @@ function read(fromUrl) {
       if (fromUrl) {
         const article = await (await post("/api/article", { url: input }, signal)).json();
         signal.throwIfAborted();
-        $("#article-title").textContent = article.title;
-        $("#byline").textContent = article.byline;
-        $("#source").textContent = article.url;
-        $("#source").href = article.url;
         textArea.value = text = article.text;
         sessionHasText = hasReadText = true;
-        setText($("#article-body"), article.text);
-        $("#article-panel").hidden = false;
-        $("#editor").open = false;
-        setText($("#editor-summary"), "Edit article text");
-        $("#paste-fallback").setAttribute("aria-expanded", "false");
+        showNarratedText(text, article);
         revealWorkspace();
-      }
-      const hasArticle = !$("#article-panel").hidden;
-      return { text, voice, speed, title: hasArticle ? $("#article-title").textContent.slice(0, 200) : "Pasted text",
-        byline: hasArticle ? $("#byline").textContent.slice(0, 500) : "", ...(hasArticle ? { sourceUrl: $("#source").href } : {}) };
+        $("#editor").open = false;
+        $("#paste-fallback").setAttribute("aria-expanded", "false");
+      } else if (hasArticle()) showNarratedText(text);
+      narrated = text;
+      const fromArticle = hasArticle();
+      return { text, voice, speed, title: fromArticle ? $("#article-title").textContent.slice(0, 200) : "Pasted text",
+        byline: fromArticle ? $("#byline").textContent.slice(0, 500) : "", ...(fromArticle ? { sourceUrl: $("#source").href } : {}) };
     });
   } catch (error) { showFeedback(error.message); }
 }
@@ -221,6 +256,7 @@ window.addEventListener("pageshow", () => void narrator?.refresh());
 const recovery = new StreamingPlayer({
   audio: $("#narration-audio"), bookmarkReady,
   onUpdate: update => { if (narrator === recovery) render(update); },
+  onTimeline: () => { if (narrator === recovery) highlight.setTimeline(recovery.sentences, recovery.timings); },
   onRestore: content => {
     if (narrator !== recovery) return;
     source = content.sourceUrl ? "url" : "text";
@@ -231,14 +267,8 @@ const recovery = new StreamingPlayer({
     updateSettingsSummary();
     if (content.sourceUrl) {
       $("#url").value = content.sourceUrl;
-      setText($("#article-title"), content.title);
-      setText($("#byline"), content.byline);
-      setText($("#source"), content.sourceUrl);
-      $("#source").href = content.sourceUrl;
-      setText($("#article-body"), content.text);
-      $("#article-panel").hidden = false;
-      setText($("#editor-summary"), "Edit article text");
-    } else $("#editor").open = true;
+      showNarratedText(content.text, { title: content.title, byline: content.byline, url: content.sourceUrl });
+    } else showNarratedText(content.text);
     $("#diagnostics").hidden = false;
     revealWorkspace();
   },

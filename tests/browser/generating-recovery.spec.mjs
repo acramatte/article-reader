@@ -94,12 +94,16 @@ async function restoreFarPosition(page, target, id, status) {
   expect(audioRequests.length).toBeGreaterThan(0);
   expect(audioRequests.every(search => search === `?start=${position}.000`)).toBe(true);
   expect((await status()).state).toBe("generating");
+  // Each 10 s chunk is one sentence: the recovered offset addresses recording time, not the response.
+  const highlighted = () => page.evaluate(() => [...(CSS.highlights.get("narration") ?? [])].map(range => range.toString()));
+  if (target.path === "/") await expect.poll(highlighted).toEqual([`Paragraph ${position / chunkSeconds + 1}.`]);
 
   await page.locator(target.resume).click();
   await expect.poll(() => page.locator("audio").evaluate(audio => audio.currentTime)).toBeGreaterThan(0.3);
   expect((await status()).state).toBe("generating");
   release(); // Playback must continue into audio generated after the recovered response started.
   await expect.poll(() => page.locator("audio").evaluate(audio => audio.currentTime), { timeout: 30_000 }).toBeGreaterThan(12);
+  if (target.path === "/") await expect.poll(highlighted).toEqual([`Paragraph ${generatedChunks + 1}.`]);
   await page.locator("audio").evaluate(audio => audio.pause()); // Both pages save the bookmark on pause.
   const playedTo = await page.evaluate(key => JSON.parse(localStorage.getItem(key)).positionSeconds, BOOKMARK_KEY);
   expect(playedTo).toBeGreaterThan(generatedChunks * chunkSeconds + 1);

@@ -51,8 +51,8 @@ export function createStreamingApi(options, readJson) {
     if (request.method === "POST" && url.pathname === "/api/streaming") {
       const body = await readJson(request, { maxBytes: 6 * config.maxTextChars + metadataBodyBytes });
       validate(body, config.maxTextChars, options.voices);
-      const session = await narrations.create(body);
-      json(201, { id: session.id, audioUrl: `/api/streaming/${session.id}/audio` });
+      const session = await narrations.create({ ...body, language: options.voices.get(body.voice) });
+      json(201, { id: session.id, audioUrl: `/api/streaming/${session.id}/audio`, sentences: session.sentences });
       return true;
     }
     const route = /^\/api\/streaming\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(status|events|content|audio|stop|mark)$/.exec(url.pathname);
@@ -64,7 +64,7 @@ export function createStreamingApi(options, readJson) {
     else if (request.method === "GET" && action === "content") {
       if (session.text === null) json(410, { error: "Narration content is no longer available." });
       else json(200, { text: session.text, title: session.title, byline: session.byline, sourceUrl: session.sourceUrl,
-        voice: session.voice, speed: session.speed });
+        voice: session.voice, speed: session.speed, sentences: session.sentences, timings: session.timings });
     } else if (request.method === "GET" && action === "audio") {
       const start = url.searchParams.get("start");
       if (start !== null && !/^\d{1,6}(?:\.\d{1,3})?$/.test(start)) json(400, { error: "start must be a playback position in seconds." });

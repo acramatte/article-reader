@@ -98,6 +98,20 @@ async function* statusEvents(response) {
   }
 }
 
+async function* sseEvents(response) {
+  let buffer = "";
+  for await (const bytes of response.body) {
+    buffer += Buffer.from(bytes).toString();
+    let end;
+    while ((end = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      const event = /^event: (\w+)\n/.exec(frame);
+      if (event) yield { event: event[1], data: JSON.parse(frame.slice(frame.indexOf("data: ") + 6)) };
+    }
+  }
+}
+
 async function nextStatus(events, accept) {
   for (;;) {
     const { value, done } = await events.next();
@@ -105,6 +119,31 @@ async function nextStatus(events, accept) {
     if (accept(value)) return value;
   }
 }
+
+test("sentence timings are sent live and on reconnect, in recording seconds", async t => {
+  const chunks = new EventTarget();
+  const { base, post } = await app(t, { synthesizeChunk: async (_body, signal) => {
+    await once(chunks, "chunk", { signal });
+    return wav(3);
+  } });
+  const text = "First one. Second sentence here.\n\nThird.";
+  const created = await post("/api/streaming", { text, voice: "jane", speed: 1.5 });
+  const { id, sentences } = await created.json();
+  assert.deepEqual(sentences.map(([start, end]) => text.slice(start, end)), ["First one.", "Second sentence here.", "Third."]);
+  const live = sseEvents(await fetch(`${base}/api/streaming/${id}/events`, { signal: AbortSignal.timeout(5000) }));
+  assert.equal((await live.next()).value.event, "status", "no timings before audio exists");
+  chunks.dispatchEvent(new Event("chunk"));
+  let next;
+  while ((next = (await live.next()).value).event !== "timing");
+  // 3 s of synthesis at 1.5× is 2 s, split by length plus a per-sentence allowance (10+12 : 21+12).
+  assert.deepEqual(next.data, { from: 0, timings: [[0, 0.8], [0.8, 2]] });
+  chunks.dispatchEvent(new Event("chunk"));
+  while ((next = (await live.next()).value).event !== "timing");
+  assert.deepEqual(next.data, { from: 2, timings: [[2, 4]] });
+  const resumed = sseEvents(await fetch(`${base}/api/streaming/${id}/events`, { signal: AbortSignal.timeout(5000) }));
+  assert.deepEqual((await resumed.next()).value, { event: "timing", data: { from: 0, timings: [[0, 0.8], [0.8, 2], [2, 4]] } });
+  assert.equal((await resumed.next()).value.event, "status");
+});
 
 test("SSE sends live progress and a fresh reconnect snapshot, then closes on readiness", async t => {
   const chunks = new EventTarget();
