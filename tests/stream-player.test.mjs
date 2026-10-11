@@ -33,6 +33,7 @@ class MediaFixture extends EventTarget {
 class StatusFixture extends EventTarget {
   constructor(url) { super(); this.url = url; this.readyState = 1; }
   send(snapshot) { this.dispatchEvent(new MessageEvent("status", { data: JSON.stringify(snapshot) })); }
+  timing(from, timings) { this.dispatchEvent(new MessageEvent("timing", { data: JSON.stringify({ from, timings }) })); }
   disconnect(state = 0) { this.readyState = state; this.onerror(); }
   close() { this.readyState = 2; }
 }
@@ -393,4 +394,26 @@ test("a rejected SSE connection diagnoses once, offers Retry, and ignores events
   assert.equal(updates.at(-1).state, "stopped");
   assert.equal(bookmark.load(), null);
   assert.equal(events[1].readyState, 2);
+});
+
+test("a ready status GET loads final sentence timings that SSE missed", async t => {
+  const sentences = [[0, 10], [11, 20]];
+  let snapshot = { state: "generating", generated: 1, total: 2, timed: 1 };
+  const { player, calls, events } = fixture(t, path => path.endsWith("/status") ? snapshot
+    : path.endsWith("/content") ? { ...content, sentences, timings: [[0, 10], [10, 20]] } : { id, sentences });
+  await player.start(async () => content);
+  events[0].timing(0, [[0, 10]]);
+  events[0].send(snapshot);
+  await tick();
+  assert.deepEqual(player.timings, [[0, 10]]);
+  // Chunk 2 finishes while the status connection is down; the next GET already reports readiness.
+  events[0].disconnect();
+  snapshot = { ...ready, timed: 2 };
+  await player.refresh();
+  assert.equal(player.events, null);
+  assert.deepEqual(player.sentences, sentences);
+  assert.deepEqual(player.timings, [[0, 10], [10, 20]]);
+  assert.equal(calls.filter(call => call.path.endsWith("/content")).length, 1);
+  await player.refresh(); // Complete timings are not fetched again.
+  assert.equal(calls.filter(call => call.path.endsWith("/content")).length, 1);
 });

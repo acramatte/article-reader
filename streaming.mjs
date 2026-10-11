@@ -161,6 +161,7 @@ export class StreamingNarrations {
     return { id: session.id, state: session.state, warming: session.warming, generated: session.generated,
       total: session.chunks.length, bytes: session.bytes, audioSecondsGenerated: session.audioSecondsGenerated,
       firstByteSeconds: session.firstByteSeconds, elapsedSeconds: (Date.now() - session.startedAt) / 1000,
+      timed: session.timings.length,
       consumers: session.consumers, error: session.error, mark: session.mark,
       voice: session.voice, speed: session.speed, title: session.title,
       generationDeadline: session.state === "generating" ? session.generationDeadline : null,
