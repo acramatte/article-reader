@@ -18,6 +18,11 @@ test("reported pronunciation failures are spoken as intended", () => {
   // Pocket TTS reads digit tokens one by one: "128K" was spoken "twelve eight K".
   assert.equal(speak("The Mini version comes in two variants 4K and 128K which is the context length (in tokens)."),
     "The Mini version comes in two variants four K and one hundred twenty-eight K which is the context length (in tokens).");
+  // A semicolon inside "TL;DR" made the model garble the phrase: "Chapter 0: TL;DR" was spoken "Chapter T".
+  assert.equal(speak('This blog post contains "Chapter 0: TL;DR" of my latest book.'),
+    'This blog post contains "Chapter zero: T L D R" of my latest book.');
+  assert.equal(speak("tl;dr; TL;DR: done. Tl;Dr", "fr"), "T L D R; T L D R: done. T L D R");
+  for (const text of ["xTL;DR", "TL;DRs", "a;b", "TL; DR"]) assert.equal(speak(text), text, text);
 });
 
 test("common variants of the reported cases", () => {
@@ -46,7 +51,7 @@ test("numbers are spoken as words, with years, decimals, ordinals, suffixes and 
   // Without a year context the cardinal is used: always a valid reading.
   assert.equal(speak("from 2048 to 4096 tokens"), "from two thousand forty-eight to four thousand ninety-six tokens");
   assert.equal(speak("3.5 GHz, 3.14, 0.05, 16GB, 75%, 128-bit, the 22nd, 101st and 3rd"),
-    "three point five GHz, three point one four, zero point zero five, sixteen GB, seventy-five%, one hundred twenty-eight-bit, the twenty-second, one hundred first and third");
+    "three point five gigahertz, three point one four, zero point zero five, sixteen GB, seventy-five%, one hundred twenty-eight-bit, the twenty-second, one hundred first and third");
   assert.equal(speak("$50, $1, $1.5B, €2 million, £3.50 and 20€"),
     "fifty dollars, one dollar, one point five billion dollars, two million euros, three point five zero pounds and twenty euros");
   assert.equal(speak("En 1999, 42 poules, 128 000 jetons, 1,5 kilo, 3,14, 75 %, 16 Go, 50 €, 3 000 $, 2 M$, 2 millions.", "fr"),
@@ -55,14 +60,15 @@ test("numbers are spoken as words, with years, decimals, ordinals, suffixes and 
 });
 
 test("identifiers, codes and unrelated text are left unchanged", () => {
-  for (const text of ["d1-3B", "d1-300B", "Llama-3-8B", "Qwen2.5-72B", "GPT-4o", "Phi-3", "COVID-19", "H100", "RTX4090Ti",
+  for (const text of ["d1-3B", "d1-300B", "Llama-3-8B", "Qwen2.5-72B", "GPT-4o", "Phi-3", "COVID-19", "COVID19", "B2B", "RTX4090Ti",
     "0x1e", "4x4", "1920x1080", "x86", "v2x", "1.2.3x", "3.11.2", "2X", "1x speed", "1e-5", "10e3", "1080p", "5G", "3D",
-    "2026-09-30", "30/09/2026", "192.168.1.1", "555-123-4567", "10:30", "16:9", "007", "#42", "@3", "3s",
+    "09/10/2026", "v2026-09-30", "192.168.1.1", "10:30:15", "25:00", "16:9", "007", "@3", "3s", "5m users", "4g", "24h",
+    "J. M. Barrie", "Dr. who?", "No. I won't.", "vsync",
     "MS-DOS", "Ms. Smith", "Sep is short for September.", "Mar-a-Lago", "Sept chats"]) {
     assert.equal(speak(text), text, text);
   }
   for (const text of ["d1-3B", "1e-5", "10e3", "2e-3", "0e", "01e", "10es", "1e", "Il a sept ans.", "Sept chats.",
-    "XIXe siècle", "1 voiture", "2026-09-30", "10:30"]) {
+    "XIXe siècle", "1 voiture", "M. le maire", "25h00"]) {
     assert.equal(speak(text, "fr"), text, text);
   }
   // Rules follow the narration language only.
@@ -71,6 +77,32 @@ test("identifiers, codes and unrelated text are left unchanged", () => {
   assert.equal(speak("Jan said 2 things."), "Jan said two things.");
   // An unsupported language only loses reference URLs.
   assert.equal(speak("2-3x in 16 ms, see https://example.com/x\n\nhttps://example.com/ref", "de"), "2-3x in 16 ms, see https://example.com/x\n\n");
+});
+
+test("units, clock times, dates, phone numbers, abbreviations and codes are spoken in full", () => {
+  assert.equal(speak("A 3 cm screw weighs 2.5 kg; at 120 km/h for 15 km, it draws 450 W and 30 kWh a month."),
+    "A three centimeters screw weighs two point five kilograms; at one hundred twenty kilometers per hour for fifteen kilometers, it draws four hundred fifty watts and thirty kilowatt-hours a month.");
+  assert.equal(speak("Bake at 180 °C or 350 °F for 20 min, add 250 ml and 1 L, wait 30 s or 1 h; 45°, 50 m², 10–20 ms."),
+    "Bake at one hundred eighty degrees Celsius or three hundred fifty degrees Fahrenheit for twenty minutes, add two hundred fifty milliliters and one liter, wait thirty seconds or one hour; forty-five degrees, fifty square meters, ten to twenty milliseconds.");
+  assert.equal(speak("Cuire 20 min à 180 °C, rouler à 120 km/h, peser 2,5 kg, attendre 1 s.", "fr"),
+    "Cuire vingt minutes à cent quatre-vingts degrés Celsius, rouler à cent vingt kilomètres par heure, peser deux virgule cinq kilogrammes, attendre une seconde.");
+  assert.equal(speak("Starts at 10:30, ends at 9:05 PM; doors open at 9am, close at 5 p.m., meet at 10:00."),
+    "Starts at ten thirty, ends at nine oh five p.m.; doors open at nine a.m., close at five p.m., meet at ten o'clock.");
+  assert.equal(speak("Rendez-vous à 10h30, 9 h 05, 10:30, 18 h, 1h ou 21h.", "fr"),
+    "Rendez-vous à dix heures trente, neuf heures cinq, dix heures trente, dix-huit heures, une heure ou vingt et une heures.");
+  assert.equal(speak("Shipped 2026-09-30, 30/09/2026 and 09/30/2026."),
+    "Shipped September thirtieth, twenty twenty-six, September thirtieth, twenty twenty-six and September thirtieth, twenty twenty-six.");
+  assert.equal(speak("Publié le 2026-09-30, puis le 01/10/2026.", "fr"),
+    "Publié le trente septembre deux mille vingt-six, puis le premier octobre deux mille vingt-six.");
+  assert.equal(speak("Call 555-123-4567, (555) 123-4567 or +44 20 7946 0958."),
+    "Call five five five, one two three, four five six seven, five five five, one two three, four five six seven or plus four four, two zero, seven nine four six, zero nine five eight.");
+  assert.equal(speak("Appelez le 01 23 45 67 89 ou le +33 1 23 45 67 89.", "fr"),
+    "Appelez le zéro un, vingt-trois, quarante-cinq, soixante-sept, quatre-vingt-neuf ou le plus trente-trois, un, vingt-trois, quarante-cinq, soixante-sept, quatre-vingt-neuf.");
+  assert.equal(speak("Dr. Smith met Prof. Lee and Mr. Jones, e.g. at work, i.e. daily, etc. Apple vs. Google, approx. 5 times. No. 5 and #42."),
+    "Doctor Smith met Professor Lee and Mister Jones, for example at work, that is daily, et cetera. Apple versus Google, approximately five times. Number five and number forty-two.");
+  assert.equal(speak("M. Dupont et Mme Martin, p. ex. le Dr Durand, c.-à-d. le n° 5, env. 30 personnes, etc. Fin.", "fr"),
+    "Monsieur Dupont et Madame Martin, par exemple le Docteur Durand, c'est-à-dire le numéro cinq, environ trente personnes, et cetera. Fin.");
+  assert.equal(speak("It ran on an H100 and an A100 in Q3, saved as MP3."), "It ran on an H one hundred and an A one hundred in Q three, saved as MP three.");
 });
 
 test("punctuation, paragraph boundaries and unit casing are preserved", () => {
