@@ -145,6 +145,26 @@ test("sentence timings are sent live and on reconnect, in recording seconds", as
   assert.equal((await resumed.next()).value.event, "status");
 });
 
+test("a timing replay larger than the write buffer arrives in batches on every connection", async t => {
+  const { base, post, server } = await app(t, { synthesizeChunk: async () => wav(0.05) });
+  const created = await post("/api/streaming", { text: "Go! ".repeat(15000).trim(), voice: "jane", speed: 1 });
+  const { id } = await created.json();
+  await server.narrations.sessions.get(id).done;
+  for (let connection = 0; connection < 2; connection++) {
+    let next = 0;
+    let state;
+    for await (const { event, data } of sseEvents(await fetch(`${base}/api/streaming/${id}/events`, { signal: AbortSignal.timeout(10_000) }))) {
+      if (event === "timing") {
+        assert.equal(data.from, next);
+        assert.ok(data.timings.length <= 1000);
+        next += data.timings.length;
+      } else state = data.state;
+    }
+    assert.equal(next, 15000, "all 15,000 sentence timings (over 200 KB) are replayed");
+    assert.equal(state, "ready", "the stream ends normally with the current state");
+  }
+});
+
 test("SSE sends live progress and a fresh reconnect snapshot, then closes on readiness", async t => {
   const chunks = new EventTarget();
   const { base, create, post } = await app(t, { synthesizeChunk: async (_body, signal, warming) => {

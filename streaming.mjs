@@ -141,7 +141,7 @@ export class StreamingNarrations {
       sentences: plan.sentences.map(({ start, end }) => [start, end]), sentenceLengths: plan.sentences.map(s => s.length),
       chunkSentences: plan.chunks.map(chunk => chunk.sentences), timings: [],
       generated: 0, bytes: 0, audioSecondsGenerated: 0, startedAt: Date.now(), consumers: 0, firstByteSeconds: null,
-      subscribers: new Set() };
+      subscribers: new Set(), replaying: 0 };
     this.sessions.set(session.id, session);
     session.generationDeadline = Date.now() + this.generationMs;
     session.generationTimer = setTimeout(() => {
@@ -203,16 +203,18 @@ export class StreamingNarrations {
     for (const send of session.subscribers) send("timing", { from: sentences[0], timings });
   }
 
-  events(session, response) {
-    if (session.subscribers.size >= 4) {
+  async events(session, response) {
+    if (session.subscribers.size + session.replaying >= 4) {
       throw Object.assign(new Error("Too many status connections for this recording."), { status: 429 });
     }
     response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store, no-transform",
       "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" });
     response.flushHeaders();
     let heartbeat;
+    const closed = new AbortController();
     const cleanup = () => {
       clearInterval(heartbeat);
+      closed.abort();
       session.subscribers.delete(send);
       response.off("close", cleanup);
     };
@@ -232,11 +234,26 @@ export class StreamingNarrations {
       }
     };
     response.on("close", cleanup);
+    // Every connection starts with the known timings, then the current state; no replay log is needed.
+    // Timings can exceed the write buffer, so replay them in batches, waiting (boundedly) for each to
+    // drain. Subscribing only once caught up cannot miss timings published during the replay.
+    session.replaying++;
+    try {
+      for (let from = 0; from < session.timings.length && !closed.signal.aborted;) {
+        const timings = session.timings.slice(from, from + 1000);
+        if (!response.write(`event: timing\ndata: ${JSON.stringify({ from, timings })}\n\n`)) {
+          await once(response, "drain", { signal: AbortSignal.any([closed.signal, AbortSignal.timeout(15_000)]) });
+        }
+        from += timings.length;
+      }
+    } catch {
+      cleanup();
+      response.destroy();
+    } finally { session.replaying--; }
+    if (closed.signal.aborted) return;
     session.subscribers.add(send);
     heartbeat = setInterval(() => write(": heartbeat\n\n"), 15_000);
     heartbeat.unref();
-    // No replay log is needed: every connection starts with the known timings and current state.
-    if (session.timings.length) send("timing", { from: 0, timings: session.timings });
     send("status", this.snapshot(session));
   }
 
