@@ -247,6 +247,13 @@ export class StreamingPlayer {
         }
         this.restorePosition();
       }
+      // SSE closes on readiness, and a status GET can report it before the final timing events arrived.
+      if (this.snapshot.state === "ready" && this.snapshot.timed > this.timings.length) {
+        const { timings } = await (this.timingTask ??= this.json(`/api/streaming/${this.id}/content`)
+          .finally(() => { this.timingTask = null; }));
+        if (this.controller.signal.aborted) return;
+        this.setTimeline(undefined, timings);
+      }
       this.emit();
     } catch (error) {
       this.contentTask = null;
