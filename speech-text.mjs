@@ -12,10 +12,68 @@ const number = String.raw`\d+(?:[.,]\d+)?`;
 const space = String.raw`[ \u00a0\u202f]`;
 
 const words = {
-  en: { to: "to", times: "times", dot: "dot", link: "a link",
-    units: { ms: ["millisecond", "milliseconds"], ns: ["nanosecond", "nanoseconds"], µs: ["microsecond", "microseconds"] } },
-  fr: { to: "à", times: "fois", dot: "point", link: "un lien",
-    units: { ms: ["milliseconde", "millisecondes"], ns: ["nanoseconde", "nanosecondes"], µs: ["microseconde", "microsecondes"] } },
+  en: { to: "to", times: "times", dot: "dot", link: "a link" },
+  fr: { to: "à", times: "fois", dot: "point", link: "un lien" },
+};
+
+// Units after a number, in their exact case: [English singular, plural, French singular, plural, French gender].
+// Pocket TTS misreads most abbreviations ("3 cm" → "three seam", "20 min" → "twenty men", "km/h" → "mosh").
+const unitNames = {
+  ms: ["millisecond", "milliseconds", "milliseconde", "millisecondes", "f"],
+  µs: ["microsecond", "microseconds", "microseconde", "microsecondes", "f"],
+  ns: ["nanosecond", "nanoseconds", "nanoseconde", "nanosecondes", "f"],
+  s: ["second", "seconds", "seconde", "secondes", "f"],
+  min: ["minute", "minutes", "minute", "minutes", "f"],
+  h: ["hour", "hours", "heure", "heures", "f"],
+  mm: ["millimeter", "millimeters", "millimètre", "millimètres"],
+  cm: ["centimeter", "centimeters", "centimètre", "centimètres"],
+  m: ["meter", "meters", "mètre", "mètres"],
+  km: ["kilometer", "kilometers", "kilomètre", "kilomètres"],
+  "m²": ["square meter", "square meters", "mètre carré", "mètres carrés"],
+  "km²": ["square kilometer", "square kilometers", "kilomètre carré", "kilomètres carrés"],
+  "m/s": ["meter per second", "meters per second", "mètre par seconde", "mètres par seconde"],
+  "km/h": ["kilometer per hour", "kilometers per hour", "kilomètre par heure", "kilomètres par heure"],
+  mph: ["mile per hour", "miles per hour", "mile par heure", "miles par heure"],
+  mg: ["milligram", "milligrams", "milligramme", "milligrammes"],
+  g: ["gram", "grams", "gramme", "grammes"],
+  kg: ["kilogram", "kilograms", "kilogramme", "kilogrammes"],
+  ml: ["milliliter", "milliliters", "millilitre", "millilitres"],
+  L: ["liter", "liters", "litre", "litres"],
+  Hz: ["hertz", "hertz", "hertz", "hertz"],
+  kHz: ["kilohertz", "kilohertz", "kilohertz", "kilohertz"],
+  MHz: ["megahertz", "megahertz", "mégahertz", "mégahertz"],
+  GHz: ["gigahertz", "gigahertz", "gigahertz", "gigahertz"],
+  W: ["watt", "watts", "watt", "watts"],
+  kW: ["kilowatt", "kilowatts", "kilowatt", "kilowatts"],
+  MW: ["megawatt", "megawatts", "mégawatt", "mégawatts"],
+  Wh: ["watt-hour", "watt-hours", "wattheure", "wattheures"],
+  kWh: ["kilowatt-hour", "kilowatt-hours", "kilowattheure", "kilowattheures"],
+  "°C": ["degree Celsius", "degrees Celsius", "degré Celsius", "degrés Celsius"],
+  "°F": ["degree Fahrenheit", "degrees Fahrenheit", "degré Fahrenheit", "degrés Fahrenheit"],
+  "°": ["degree", "degrees", "degré", "degrés"],
+};
+unitNames.mL = unitNames.ml;
+unitNames["μs"] = unitNames["µs"];
+// Glued to the number these mean something else: "1990s", "5m" (million), "4g" (network), "10h30" (a time).
+const spacedUnits = new Set(["s", "h", "m", "g"]);
+
+const monthWords = {
+  en: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+  fr: ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"],
+};
+
+// Abbreviations Pocket TTS misreads ("i.e." → "e.", "vs." → "VSGOO", "approx." → "a prox", "p. ex." → "Bix").
+// [pattern, spoken, what follows]: titles need a capitalized name, "No." a number.
+const abbreviations = {
+  en: [[String.raw`Dr\.`, "Doctor", "name"], [String.raw`Mr\.`, "Mister", "name"], [String.raw`Mrs\.`, "Missus", "name"],
+    [String.raw`Prof\.`, "Professor", "name"], [String.raw`No\.`, "number", "number"], [String.raw`vs\.?`, "versus", "any"],
+    [String.raw`e\.g\.`, "for example", "any"], [String.raw`i\.e\.`, "that is", "any"], [String.raw`approx\.`, "approximately", "any"],
+    [String.raw`etc`, "et cetera", "dot"]],
+  fr: [[String.raw`M\.`, "Monsieur", "name"], [String.raw`MM\.`, "Messieurs", "name"], [String.raw`Mme\.?`, "Madame", "name"],
+    [String.raw`Mlle\.?`, "Mademoiselle", "name"], [String.raw`Dr\.?`, "Docteur", "name"], [String.raw`Pr\.?`, "Professeur", "name"],
+    [String.raw`[nN]°`, "numéro", "number"], [String.raw`p\.${space}?ex\.`, "par exemple", "any"],
+    [String.raw`c\.?-à-d\.?`, "c'est-à-dire", "any"], [String.raw`env\.`, "environ", "number"], [String.raw`vs\.?`, "versus", "any"],
+    [String.raw`etc`, "et cetera", "dot"]],
 };
 
 const englishMonths = { Jan: "January", Feb: "February", Mar: "March", Apr: "April", Jun: "June", Jul: "July", Aug: "August",
@@ -115,23 +173,23 @@ function editor(length) {
 }
 
 function languageEdits(text, language, edits) {
-  const { to, times, units } = words[language];
-  const plural = value => language === "fr" ? Number(value.replace(",", ".")) >= 2 : value !== "1";
-  // Dates, IP addresses, versions, phone numbers and clock times stay as written:
-  // "2026-09-30", "30/09/2026", "192.168.1.1", "3.11.2", "555-123-4567", "10:30".
+  const { to, times } = words[language];
+  // "TL;DR": a semicolon inside the acronym breaks it into a clause boundary and garbled letters
+  // ("Chapter 0: TL;DR" → "Chapter T"). Spaced letters are read reliably; a glued "TLDR" is often skipped.
+  for (const match of text.matchAll(/(?<![\p{L}\p{N}_])tl;dr(?![\p{L}\p{N}_])/giu)) {
+    edits.add(match.index, match.index + match[0].length, "T L D R");
+  }
+  abbreviationEdits(text, language, edits);
+  phoneEdits(text, language, edits);
+  dateEdits(text, language, edits);
+  timeEdits(text, language, edits);
+  // Other dates, IP addresses, versions, numbers with several separators and clock times with
+  // seconds stay as written: "09/10/2026" (day or month first?), "192.168.1.1", "3.11.2", "10:30:15".
   for (const match of text.matchAll(/(?<![\p{L}\p{N}_])\d+([-/.:])\d+(?:\1\d+)+(?![\p{L}\p{N}_])|(?<![\p{N}:])\d{1,2}:\d{2}(?![\p{N}])/gu)) {
     edits.keep(match.index, match.index + match[0].length);
   }
   currencyEdits(text, language, edits);
-  // "16 ms", "16ms", "10–20 ms": a time unit only after a number, in its exact case.
-  const unit = new RegExp(String.raw`${before}(${number})(?:${space}?[-–]${space}?(${number}))?${space}?(ms|ns|µs|μs)(?!${alnum})`, "gu");
-  for (const match of text.matchAll(unit)) {
-    const [singular, many] = units[match[3] === "μs" ? "µs" : match[3]];
-    const value = match[2] ?? match[1];
-    let amount = match[2] ? `${speakNumber(match[1], language)} ${to} ${speakNumber(match[2], language)}` : speakNumber(match[1], language);
-    if (language === "fr") amount = amount.replace(/\bun$/, "une"); // "une milliseconde", "vingt et une millisecondes"
-    edits.add(match.index, match.index + match[0].length, `${amount} ${match[2] || plural(value) ? many : singular}`);
-  }
+  unitEdits(text, language, edits);
   // "2-3x", "2–3×", "10x": a multiplier directly after a number, never inside a token like "4x4" or "0x1f".
   const multiplier = new RegExp(String.raw`${before}(${number})(?:${space}?[-–]${space}?(${number}))?[x×](?!${alnum})`, "gu");
   for (const match of text.matchAll(multiplier)) {
@@ -171,7 +229,137 @@ function languageEdits(text, language, edits) {
       } else if (["ème", "eme", "ᵉ", "e"].includes(suffix)) edits.add(match.index, match.index + match[0].length, frenchOrdinal(value));
     }
   }
+  codeEdits(text, language, edits);
   numberEdits(text, language, edits);
+}
+
+function digitWords(digits, language) {
+  return [...digits].map(digit => numberWords(digit, language)).join(" ");
+}
+
+// "Dr. Smith" → "Doctor Smith", "e.g." → "for example", "No. 5" → "number 5", "M. Dupont" → "Monsieur Dupont".
+function abbreviationEdits(text, language, edits) {
+  for (const [pattern, spoken, follows] of abbreviations[language]) {
+    const next = { name: String.raw`(?=${space}+\p{Lu}\p{Ll})`, number: String.raw`(?=${space}?\d)`, any: String.raw`(?![\p{L}\p{N}_])`,
+      dot: String.raw`(?=\.)` }[follows];
+    // Not an initial: "J. M. Barrie".
+    const regex = new RegExp(String.raw`(?<![\p{L}\p{N}_.])(?<!\p{Lu}\.${space})${pattern}${next}`, "gu");
+    for (const match of text.matchAll(regex)) {
+      // "etc." keeps a dot that may also end the sentence.
+      const end = match.index + match[0].length + (follows === "dot" ? abbreviationDot(text, match.index + match[0].length) : 0);
+      // "No. 5" → "Number five", "E.g." → "For example" at a sentence start.
+      const cased = /^\p{Lu}/u.test(match[0]) ? spoken[0].toUpperCase() + spoken.slice(1) : spoken;
+      edits.add(match.index, end, cased);
+    }
+  }
+  if (language === "en") {
+    for (const match of text.matchAll(/(?<![\p{L}\p{N}_&#])#(\d+)(?![\p{L}\p{N}_])/gu)) {
+      edits.add(match.index, match.index + match[0].length, `number ${speakNumber(match[1], language)}`);
+    }
+  }
+}
+
+// Phone numbers, digit by digit in English ("five five five, one two three, four five six seven") and
+// by pairs in French ("zéro un, vingt-trois, …"). Read as cardinals they are garbled.
+function phoneEdits(text, language, edits) {
+  const groups = (parts, pairs) => parts.map(part => pairs && part.length === 2
+    ? (part[0] === "0" ? `zéro ${numberWords(part[1], language)}` : numberWords(part, language))
+    : digitWords(part, language)).join(", ");
+  const nanp = /(?<![\p{L}\p{N}_+])(?:\+1[ .-]?)?(?:\((\d{3})\)[ .-]?|(\d{3})[ .-])(\d{3})[ .-](\d{4})(?![\p{L}\p{N}_])/gu;
+  if (language === "en") {
+    for (const match of text.matchAll(nanp)) {
+      const spoken = groups([match[1] ?? match[2], match[3], match[4]], false);
+      edits.add(match.index, match.index + match[0].length, `${match[0].startsWith("+") ? `plus ${digitWords("1", language)}, ` : ""}${spoken}`);
+    }
+  }
+  const pairs = language === "fr";
+  for (const match of text.matchAll(/(?<![\p{L}\p{N}_])\+(\d{1,3})((?:[ .-]\d{1,4}){2,6})(?![\p{L}\p{N}_])/gu)) {
+    const country = pairs ? numberWords(match[1], language) : digitWords(match[1], language);
+    edits.add(match.index, match.index + match[0].length, `plus ${country}, ${groups(match[2].trim().split(/[ .-]/), pairs)}`);
+  }
+  if (language === "fr") {
+    for (const match of text.matchAll(/(?<![\p{L}\p{N}_])0\d(?:[ .]\d{2}){4}(?![\p{L}\p{N}_])/gu)) {
+      edits.add(match.index, match.index + match[0].length, groups(match[0].split(/[ .]/), true));
+    }
+  }
+}
+
+function spokenDate(day, month, year, language) {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (language === "fr") return `${day === 1 ? "premier" : numberWords(String(day), language)} ${monthWords.fr[month - 1]} ${numberWords(String(year), language)}`;
+  return `${monthWords.en[month - 1]} ${englishOrdinal(day)}, ${year >= 1100 && year <= 2099 ? englishYear(year) : numberWords(String(year), language)}`;
+}
+
+// "2026-09-30" → "September thirtieth, twenty twenty-six" / "trente septembre deux mille vingt-six". Day-first
+// "30/09/2026" is read in French, and in English only when the order is unambiguous (a day above 12).
+function dateEdits(text, language, edits) {
+  for (const match of text.matchAll(/(?<![\p{L}\p{N}_.\/-])(\d{4})-(\d{2})-(\d{2})(?![\p{L}\p{N}_\/-]|\.\d)/gu)) {
+    const spoken = spokenDate(Number(match[3]), Number(match[2]), Number(match[1]), language);
+    if (spoken) edits.add(match.index, match.index + match[0].length, spoken);
+  }
+  for (const match of text.matchAll(/(?<![\p{L}\p{N}_.\/-])(\d{1,2})([/.])(\d{1,2})\2(\d{4})(?![\p{L}\p{N}_\/-]|\.\d)/gu)) {
+    let [day, month] = [Number(match[1]), Number(match[3])];
+    if (language === "en") {
+      if (month > 12 && day <= 12) [day, month] = [month, day];
+      else if (day <= 12) continue;
+    }
+    const spoken = spokenDate(day, month, Number(match[4]), language);
+    if (spoken) edits.add(match.index, match.index + match[0].length, spoken);
+  }
+}
+
+// "9:05 PM" → "nine oh five p.m.", "9am" → "nine a.m.", "10:00" → "ten o'clock";
+// French "10h30", "10 h 30", "10:30" → "dix heures trente", "1 h" → "une heure".
+function timeEdits(text, language, edits) {
+  const ampm = String.raw`(?:${space}?([AaPp])\.?[Mm]\.?(?![\p{L}\p{N}_]))`;
+  if (language === "en") {
+    const regex = new RegExp(String.raw`(?<![\p{L}\p{N}_:.])(\d{1,2})(?::(\d{2})(?![\p{N}:])${ampm}?|${ampm})`, "gu");
+    for (const match of text.matchAll(regex)) {
+      const hour = Number(match[1]);
+      const minute = match[2] === undefined ? 0 : Number(match[2]);
+      const meridiem = match[3] ?? match[4];
+      if (minute > 59 || hour > (meridiem ? 12 : 23) || (meridiem && hour === 0)) continue;
+      const minutes = !minute ? (meridiem ? "" : " o'clock") : ` ${minute < 10 ? `oh ${numberWords(String(minute), language)}` : numberWords(String(minute), language)}`;
+      const suffix = meridiem ? ` ${meridiem.toLowerCase()}.m.` : "";
+      // A consumed "p.m." keeps its dot; the sentence may end there.
+      edits.add(match.index, match.index + match[0].length, `${numberWords(String(hour), language)}${minutes}${suffix}`);
+    }
+  } else {
+    const regex = new RegExp(String.raw`(?<![\p{L}\p{N}_:.,])(\d{1,2})(?:${space}?h${space}?(\d{2})?|:(\d{2}))(?![\p{L}\p{N}_:])`, "gu");
+    for (const match of text.matchAll(regex)) {
+      const hour = Number(match[1]);
+      const minute = Number(match[2] ?? match[3] ?? 0);
+      if (hour > 24 || minute > 59) continue;
+      const hours = `${numberWords(String(hour), language).replace(/\bun$/, "une")} heure${hour > 1 ? "s" : ""}`;
+      edits.add(match.index, match.index + match[0].length, minute ? `${hours} ${numberWords(String(minute), language)}` : hours);
+    }
+  }
+}
+
+// "3 cm" → "three centimeters", "120 km/h" → "cent vingt kilomètres par heure", "10–20 ms" → "ten to twenty milliseconds".
+function unitEdits(text, language, edits) {
+  const { to } = words[language];
+  const fr = language === "fr";
+  const amount = amountPattern(language);
+  const names = Object.keys(unitNames).sort((a, b) => b.length - a.length).map(RegExp.escape).join("|");
+  const regex = new RegExp(String.raw`${before}(${amount})(?:${space}?[-–]${space}?(${amount}))?(${space}?)(${names})(?![\p{L}\p{N}_²/])`, "gu");
+  for (const match of text.matchAll(regex)) {
+    const [, first, second, gap, unit] = match;
+    if (!gap && spacedUnits.has(unit)) continue;
+    const [enOne, enMany, frOne, frMany, gender] = unitNames[unit];
+    const many = second || (fr ? Number(first.replace(/[ \u00a0\u202f]/g, "").replace(",", ".")) >= 2 : first !== "1");
+    let spoken = second ? `${speakNumber(first, language)} ${to} ${speakNumber(second, language)}` : speakNumber(first, language);
+    if (fr && gender === "f") spoken = spoken.replace(/\bun$/, "une"); // "une milliseconde", "vingt et une heures"
+    edits.add(match.index, match.index + match[0].length, `${spoken} ${fr ? (many ? frMany : frOne) : (many ? enMany : enOne)}`);
+  }
+}
+
+// Short capital-letter codes: "H100" → "H one hundred", "Q3" → "Q three", "MP3" → "MP three".
+function codeEdits(text, language, edits) {
+  for (const match of text.matchAll(/(?<![\p{L}\p{N}_.-])(\p{Lu}{1,2})(\d{1,4})(?![\p{L}\p{N}_-])(?!\.\d)/gu)) {
+    const spoken = numberWords(match[2], language);
+    if (spoken) edits.add(match.index, match.index + match[0].length, `${match[1]} ${spoken}`);
+  }
 }
 
 const currencyNames = {
