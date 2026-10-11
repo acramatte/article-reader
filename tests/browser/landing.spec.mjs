@@ -18,6 +18,8 @@ for (const [width, reducedMotion] of [[1280, "no-preference"], [390, "no-prefere
     await mockNarration(page, { state: "generating", generated: 0, warming: true, mediaGate });
     await page.goto("/");
     await page.locator("#url").fill(article.url);
+    // Enter cannot submit until the voice catalog loads and enables Read.
+    await expect(page.locator("#read-url")).toBeEnabled();
     await page.evaluate(() => {
       const url = document.getElementById("url");
       window.__urlInput = url;
