@@ -1,0 +1,11 @@
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #111419; color: #e6e8ed; }
+    body { max-width: 700px; margin: 0 auto; padding: 20px; line-height: 1.5; }
+    h1 { font-size: 1.55rem; } h2 { font-size: 1.15rem; }
+    label { display: block; margin-top: 16px; }
+    input, textarea, select, button { box-sizing: border-box; font: inherit; border: 1px solid #46505d; border-radius: 8px; padding: 10px; background: #1b212a; color: inherit; }
+    input[type=url], textarea, audio { width: 100%; } textarea { min-height: 190px; resize: vertical; }
+    button { min-height: 44px; cursor: pointer; } button:disabled { opacity: .5; cursor: default; }
+    #start { background: #244c39; } .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0; }
+    .row label { margin: 0; } .card { padding: 16px; border: 1px solid #46505d; border-radius: 12px; margin: 20px 0; }
+    .muted { color: #aeb6c1; } #status { min-height: 1.5em; } #report { font-size: .85rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+    a { color: #92d4b0; } input[type=checkbox] { width: 20px; height: 20px; vertical-align: middle; }

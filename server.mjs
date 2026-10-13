@@ -76,7 +76,7 @@ export function createApp({
         response.writeHead(302, { Location: rootRedirect, "Cache-Control": "no-store" });
         return response.end();
       }
-      if (["/streaming.html", "/streaming.js", "/streaming-state.js", "/tts-settings.js"].includes(url.pathname)) response.setHeader("Cache-Control", "no-store");
+      if (["/streaming.html", "/streaming.css", "/streaming.js", "/streaming-state.js", "/tts-settings.js"].includes(url.pathname)) response.setHeader("Cache-Control", "no-store");
       // No CORS access; recording reads are protected too, not just state-changing POSTs.
       if (request.method === "POST" || url.pathname.startsWith("/api/streaming")) {
         if (request.method === "POST" && !/^application\/json(?:;|$)/i.test(request.headers["content-type"] || "")) return json(415, { error: "JSON content type required." });
