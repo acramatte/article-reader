@@ -477,7 +477,7 @@ test("static responses carry a strict Content-Security-Policy", async (t) => {
   t.after(() => rm(staticDir, { recursive: true, force: true }));
   const { base } = await streamingReader(t, { staticDir });
   const directives = [
-    "default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+    "default-src 'none'", "script-src 'self'", "style-src 'self'",
     "img-src 'self'", "media-src 'self'", "connect-src 'self'", "form-action 'none'",
     "base-uri 'none'", "frame-ancestors 'none'", "object-src 'none'",
   ];
