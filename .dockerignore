@@ -12,8 +12,12 @@
 !number-words.mjs
 !tts-client.mjs
 !vite.config.js
+!csp.mjs
 !server.mjs
 !article.mjs
+!isolate.mjs
+!isolated-worker.mjs
+!errors.mjs
 !streaming-server.mjs
 !streaming.mjs
 !streaming-api.mjs

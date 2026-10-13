@@ -1,9 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import http from "node:http";
 import { createApp } from "../server.mjs";
 import { html } from "./fixture.mjs";
 import { setTimeout as delay } from "node:timers/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { streamingLimits } from "../streaming-api.mjs";
 
 async function app(t, options = {}) {
@@ -79,9 +83,9 @@ test("full-length Unicode/escaped JSON fits streaming body bounds; legacy byte b
   ({ id } = await response.json());
   await post(`/api/streaming/${id}/stop`, {});
   response = await post("/api/streaming", { text: "x".repeat(700000), voice: "jane", speed: 1 });
-  assert.equal(response.status, 400); assert.match((await response.json()).error, /body is too large/);
+  assert.equal(response.status, 413); assert.match((await response.json()).error, /body is too large/);
   response = await post("/api/article", { url: "https://example.com", padding: "x".repeat(150000) });
-  assert.equal(response.status, 400); assert.match((await response.json()).error, /body is too large/);
+  assert.equal(response.status, 413); assert.match((await response.json()).error, /body is too large/);
   assert.equal(server.narrations.sessions.size, 2);
   const limited = await streamingReader(t, { maxTextChars: 7000 });
   assert.equal((await limited.post("/api/streaming", { text: "x".repeat(7001), voice: "jane", speed: 1 })).status, 400);
@@ -131,12 +135,14 @@ test("escaped maximum metadata fits the body bound alongside maximum narration t
 
 test("stream environment overrides reject malformed, nonpositive and unreasonable limits", () => {
   assert.deepEqual(streamingLimits({}, {}), { maxTextChars: 100000, maxAudioBytes: 64000000, generationMs: 1200000,
-    retentionMs: 21600000, disconnectMs: 120000, maxSessions: 4 });
+    retentionMs: 21600000, disconnectMs: 120000, maxSessions: 4, maxConsumers: 4 });
   for (const value of ["", "0", "-1", "1.5", "1e3", " 10", "10junk", "Infinity", "9999999999999"]) {
     assert.throws(() => streamingLimits({}, { STREAM_GENERATION_MS: value }), /STREAM_GENERATION_MS/);
   }
   assert.equal(streamingLimits({}, { STREAM_RETENTION_MS: "1234" }).retentionMs, 1234);
+  assert.equal(streamingLimits({}, { STREAM_MAX_CONSUMERS: "9" }).maxConsumers, 9);
   assert.throws(() => createApp({ maxTextChars: 0 }), /STREAM_MAX_TEXT_CHARS/);
+  assert.throws(() => createApp({ maxConsumers: 0 }), /STREAM_MAX_CONSUMERS/);
 });
 
 test("normal streaming shares the server-side provider and rejects non-WAV", async t => {
@@ -261,8 +267,40 @@ test("API rejects invalid requests and cross-origin browser calls", async (t) =>
   for (const body of [null, {}, { text: "", voice: "jane", speed: 1 }, { text: "x".repeat(1001), voice: "jane", speed: 1 }, { text: "Hi", voice: "unknown", speed: 1 }, { text: "Hi", voice: "jane", speed: 3 }]) assert.equal((await post("/api/tts", body)).status, 400);
   assert.equal((await post("/api/tts", { text: "«»“”()[] — *** 🎵", voice: "estelle", speed: 1 })).status, 400);
   assert.equal((await post("/api/article", {})).status, 400);
-  assert.equal((await post("/api/article", { url: "http://localhost" })).status, 400);
+  // Fetch-time rejections (validateUrl, SSRF) stay user-facing, marked as client errors at their source.
+  const local = await post("/api/article", { url: "http://localhost" });
+  assert.equal(local.status, 400);
+  assert.match((await local.json()).error, /not allowed/);
+  const file = await post("/api/article", { url: "file:///etc/passwd" });
+  assert.equal(file.status, 400);
+  assert.equal((await file.json()).error, "Only HTTP/HTTPS URLs on standard ports without credentials are supported.");
   assert.equal((await post("/api/article", {}, { Origin: "https://evil.example" })).status, 403);
+});
+
+test("unexpected errors return generic messages, while extraction errors stay user-facing", async (t) => {
+  const lines = [];
+  const consoleError = console.error;
+  t.after(() => { console.error = consoleError; });
+  console.error = (...parts) => lines.push(parts.join(" "));
+  // A malformed static path once leaked the resolved absolute filesystem path in error.message.
+  const { base, post } = await streamingReader(t, { staticDir: "dist" });
+  for (const path of ["/a%00b", "/a%zzb"]) {
+    const response = await fetch(base + path);
+    const problem = await response.json();
+    assert.equal(response.status, 400);
+    assert.equal(problem.error, "The request could not be completed.");
+    assert.match(lines.at(-1), new RegExp(`^GET ${path} `), "details are logged server-side");
+    assert.doesNotMatch(problem.error, /workspace|dist|Received|URI/);
+  }
+  // article.mjs and its injected fetchPage throw only user-facing extraction/fetch messages.
+  const extraction = await app(t, { fetchPage: async () => ({ html: "<html><p>x</p></html>", url: "https://example.com/story" }) });
+  const article = await extraction("/api/article", { url: "https://example.com/story" });
+  assert.equal(article.status, 422);
+  assert.match((await article.json()).error, /readable|enough/);
+  const timeout = await app(t, { fetchPage: async () => { throw Object.assign(new DOMException("hung", "TimeoutError")); } });
+  const expired = await timeout("/api/article", { url: "https://example.com/story" });
+  assert.equal(expired.status, 400);
+  assert.equal((await expired.json()).error, "The request timed out.");
 });
 
 test("upstream 503 exposes only a retryable code and Retry-After, not provider details", async (t) => {
@@ -320,5 +358,101 @@ test("upstream errors and non-WAV responses become actionable API errors", async
       assert.equal(result.status, 502);
       assert.ok((await result.json()).error.startsWith(name));
     }
+  }
+});
+
+// Node's fetch always sends the connection's Host, so these requests set it explicitly.
+function requestAs(server, host, path, { method = "GET", body, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request({ host: "127.0.0.1", port: server.address().port, path, method,
+      headers: { Host: host, ...(body ? { "Content-Type": "application/json" } : {}), ...headers } }, response => {
+      let text = "";
+      response.on("data", piece => { text += piece; }).on("end", () => resolve({ status: response.statusCode, text }));
+    });
+    request.on("error", reject);
+    request.end(body && JSON.stringify(body));
+  });
+}
+
+test("DNS-rebinding host names are rejected; IP literals, localhost and ALLOWED_HOSTS names are served", async t => {
+  const server = createApp({ allowedHosts: ["reader.vpn"], staticDir: "public",
+    fetchPage: async () => ({ html, url: "https://example.com/story" }) }).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.shutdown());
+  // After rebinding, the page's own name is both its Origin and the Host: the Origin check alone passed.
+  const rebound = { headers: { Origin: "http://rebind.attacker.example:8084" } };
+  for (const [path, options] of [["/api/config", rebound], ["/streaming.html", rebound],
+    ["/api/article", { ...rebound, method: "POST", body: { url: "https://example.com/story" } }]]) {
+    const response = await requestAs(server, "rebind.attacker.example:8084", path, options);
+    assert.equal(response.status, 403, path);
+    assert.match(response.text, /ALLOWED_HOSTS/);
+  }
+  for (const host of ["127.0.0.1:3001", "10.0.0.1:8084", "[::1]:3001", "localhost:5173", "reader.vpn"]) {
+    assert.equal((await requestAs(server, host, "/api/config")).status, 200, host);
+  }
+  for (const host of ["evil.example@127.0.0.1", "1.2.3.4.nip.io", "reader.vpn.attacker.example"]) {
+    assert.equal((await requestAs(server, host, "/api/config")).status, 403, host);
+  }
+  let status; // Node's client always fills in Host, so call the handler directly for a request without one.
+  await server.listeners("request")[0]({ url: "/api/config", method: "GET", headers: {} },
+    { setHeader() {}, writeHead(code) { status = code; }, end() {} });
+  assert.equal(status, 403);
+  const article = await requestAs(server, "reader.vpn", "/api/article", { method: "POST", body: { url: "https://example.com/story" },
+    headers: { Origin: "http://reader.vpn" } });
+  assert.equal(JSON.parse(article.text).title, "A garden for everyone");
+});
+
+test("one article is extracted at a time; others are told to retry", async t => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const post = await app(t, { fetchPage: async () => { await gate; return { html, url: "https://example.com/story" }; } });
+  const first = post("/api/article", { url: "https://example.com/story" });
+  await delay(50);
+  const busy = await post("/api/article", { url: "https://example.com/other" });
+  assert.equal(busy.status, 429);
+  assert.equal(busy.headers.get("Retry-After"), "2");
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal((await post("/api/article", { url: "https://example.com/story" })).status, 200);
+});
+
+test("hostile narration text is planned off the event loop and rejected promptly", async t => {
+  const { post } = await streamingReader(t);
+  let last = performance.now();
+  let stall = 0;
+  const timer = setInterval(() => { const now = performance.now(); stall = Math.max(stall, now - last); last = now; }, 10);
+  // Reported: this 100 KB paste blocked every request for 66 s, and repeatably (no session is created).
+  const started = performance.now();
+  const response = await post("/api/streaming", { text: `https://example.com/${")".repeat(99_980)}`, voice: "jane", speed: 1 });
+  clearInterval(timer);
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /only contains links/);
+  assert.ok(performance.now() - started < 5000);
+  assert.ok(stall < 250, `event loop stalled ${stall} ms`);
+});
+
+test("static responses carry a strict Content-Security-Policy", async (t) => {
+  const staticDir = await mkdtemp(join(tmpdir(), "reader-static-"));
+  await mkdir(join(staticDir, "assets"));
+  const write = (name, body) => writeFile(join(staticDir, name), body);
+  await Promise.all([
+    write("index.html", '<!doctype html><html><head><style>body{color:#172c31}</style></head><body><script type="module" src="/assets/main.js"></script></body></html>'),
+    write("streaming.html", '<!doctype html><html><head><style>body{color:#e6e8ed}</style></head><body><script type="module" src="/streaming.js"></script></body></html>'),
+    write("assets/main.js", "export {};"),
+    write("streaming.js", "export {};"),
+    write("favicon.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>'),
+  ]);
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const { base } = await streamingReader(t, { staticDir });
+  const directives = [
+    "default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+    "img-src 'self'", "media-src 'self'", "connect-src 'self'", "form-action 'none'",
+    "base-uri 'none'", "frame-ancestors 'none'", "object-src 'none'",
+  ];
+  const expected = directives.join("; ");
+  for (const path of ["/", "/index.html", "/streaming.html", "/favicon.svg", "/assets/main.js", "/streaming.js"]) {
+    const policy = (await fetch(base + path)).headers.get("content-security-policy");
+    // Exact match, not substring: a loosened policy (extra sources or directives) must fail.
+    assert.equal(policy, expected, `${path} must send the strict policy`);
   }
 });

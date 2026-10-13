@@ -4,19 +4,27 @@ import https from "node:https";
 import ipaddr from "ipaddr.js";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
+import { runIsolated } from "./isolate.mjs";
+import { userError } from "./errors.mjs";
 
 export function validateUrl(value) {
   let url;
-  try { url = new URL(value); } catch { throw new Error("Enter a valid HTTP or HTTPS URL."); }
+  try { url = new URL(value); } catch { throw userError("Enter a valid HTTP or HTTPS URL.", 400); }
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
       (url.port && !["80", "443"].includes(url.port))) {
-    throw new Error("Only HTTP/HTTPS URLs on standard ports without credentials are supported.");
+    throw userError("Only HTTP/HTTPS URLs on standard ports without credentials are supported.", 400);
   }
   return url;
 }
 
 export function isPublicAddress(address) {
-  try { return ipaddr.process(address).range() === "unicast"; } catch { return false; }
+  try {
+    const ip = ipaddr.process(address);
+    // IPv4-compatible IPv6 (::/96, e.g. ::7f00:1) hides an IPv4 address in its tail,
+    // which ipaddr.js still ranks unicast; reject the whole range like that IPv4.
+    if (ip.kind() === "ipv6" && ip.parts.slice(0, 6).every(part => part === 0)) return false;
+    return ip.range() === "unicast";
+  } catch { return false; }
 }
 
 export async function publicTarget(url, resolve = lookup) {
@@ -25,7 +33,7 @@ export async function publicTarget(url, resolve = lookup) {
     ? [{ address: hostname, family: ipaddr.parse(hostname).kind() === "ipv6" ? 6 : 4 }]
     : await resolve(hostname, { all: true, verbatim: true });
   if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
-    throw new Error("Private, local, and reserved network addresses are not allowed.");
+    throw userError("Private, local, and reserved network addresses are not allowed.", 400);
   }
   return addresses[0];
 }
@@ -92,9 +100,32 @@ export async function fetchArticleHtml(value, { signal, resolve = lookup, reques
   throw new Error("The webpage redirected too many times.");
 }
 
+// Readability's cost grows about cubically with element nesting (2,000 levels took 30 s); articles nest far less.
+const maxNesting = 400;
+function nestedBeyond(root, limit) {
+  const stack = [[root, 0]];
+  while (stack.length) {
+    const [node, depth] = stack.pop();
+    if (depth > limit) return true;
+    for (const child of node.children) stack.push([child, depth + 1]);
+  }
+  return false;
+}
+
+// Hostile HTML can take minutes or gigabytes to parse, so extraction runs in a bounded worker, which
+// loads JSDOM while the page downloads.
+export async function readArticle(value, { fetchPage = fetchArticleHtml, signal, timeoutMs = 10_000, maxHeapMb = 256 } = {}) {
+  validateUrl(value);
+  return runIsolated(import.meta.url, "extractArticle", fetchPage(value, { signal }).then(page => [page.html, page.url]),
+    { timeoutMs, maxHeapMb, signal, failure: "This webpage is too large or complex to read. Try pasting its text instead." });
+}
+
 export function extractArticle(html, url) {
   const dom = new JSDOM(html, { url }); // Scripts and remote resources are deliberately disabled.
   try {
+    if (nestedBeyond(dom.window.document.documentElement, maxNesting)) {
+      throw new Error("This webpage is too deeply nested to read. Try pasting its text instead.");
+    }
     const article = new Readability(dom.window.document, { maxElemsToParse: 50_000 }).parse();
     if (!article) throw new Error("No readable article found. Try another URL or paste the text.");
     const content = new JSDOM(article.content);

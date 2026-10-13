@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import net from "node:net";
 import { chmod, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -308,7 +309,7 @@ test("malformed request targets stay inside the HTTP error boundary", async (t) 
   const { server } = await app(t);
   let code;
   const response = { setHeader() {}, writeHead(status) { code = status; }, end() {} };
-  await assert.doesNotReject(server.listeners("request")[0]({ url: "//[", method: "GET", headers: {} }, response));
+  await assert.doesNotReject(server.listeners("request")[0]({ url: "//[", method: "GET", headers: { host: "127.0.0.1" } }, response));
   assert.equal(code, 400);
 });
 
@@ -701,6 +702,49 @@ test("concurrent creation cannot bypass single-generation admission", async (t) 
     text: "Concurrent narration", voice: "jane", speed: 1,
   })));
   assert.deepEqual(results.map(r => r.status).sort(), [201, 429, 429]);
+});
+
+test("audio consumers are capped per recording; extra connections get 429", async t => {
+  // First chunk produces bytes so audio connections attach; the gated second chunk keeps
+  // generating, which holds the connections open instead of serving and closing them.
+  let calls = 0;
+  const { base, create } = await app(t, { synthesizeChunk: async (body, signal) => {
+    if (++calls === 2) await delay(10_000, undefined, { signal });
+    return wav();
+  } });
+  const { id, audioUrl } = await create();
+  await until(() => status(base, id), s => s.bytes > 0);
+  // Four live connections consume the recording; a fifth is rejected before any audio bytes.
+  // Sockets pause after the first bytes, like real players mid-playback, so responses stay open.
+  const sockets = await Promise.all(Array.from({ length: 4 }, () => new Promise(resolve => {
+    const socket = net.connect(new URL(base).port, "127.0.0.1", () => resolve(socket));
+    socket.on("error", () => {});
+    socket.write(`GET ${audioUrl} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n`);
+    let seen = 0;
+    socket.on("data", chunk => {
+      seen += chunk.length;
+      if (seen > 100) socket.pause();
+    });
+  })));
+  t.after(() => sockets.forEach(socket => socket.destroy()));
+  await until(() => status(base, id), s => s.consumers === 4);
+  const rejected = await fetch(`${base}${audioUrl}`);
+  assert.equal(rejected.status, 429);
+  assert.equal(rejected.headers.get("retry-after"), "2");
+  assert.match((await rejected.json()).error, /Too many audio connections/);
+  // Rejection must not count as a consumer: four real connections remain.
+  assert.equal((await status(base, id)).consumers, 4);
+  // Freeing a connection admits a new consumer again.
+  sockets[0].destroy();
+  await until(() => status(base, id), s => s.consumers === 3);
+  const admitted = await fetch(`${base}${audioUrl}`);
+  assert.equal(admitted.status, 200);
+  await admitted.body.cancel().catch(() => {});
+});
+
+test("the streaming engine bounds maxConsumers like maxSessions", () => {
+  assert.throws(() => new StreamingNarrations({ maxConsumers: 101 }), /maxConsumers/);
+  assert.equal(new StreamingNarrations({ maxConsumers: 9 }).maxConsumers, 9);
 });
 
 test("encoder failures are reported, not mistaken for finished audio", async (t) => {

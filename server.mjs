@@ -1,10 +1,18 @@
 import http from "node:http";
+import { isIP } from "node:net";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchArticleHtml, extractArticle } from "./article.mjs";
+import { fetchArticleHtml, readArticle } from "./article.mjs";
+import { userError } from "./errors.mjs";
+import { contentSecurityPolicy } from "./csp.mjs";
 import { speechProvider } from "./tts-provider.mjs";
 import { createStreamingApi } from "./streaming-api.mjs";
+
+// User-facing errors are marked explicitly: an integer `status` property means the message is
+// safe to show (validation, extraction, bounded upstream rejections). Everything else is internal;
+// the client gets a generic message and the server logs the details. See errors.mjs.
+export { userError } from "./errors.mjs";
 
 export async function readJson(request, { maxBytes = 150_000 } = {}) {
   let size = 0;
@@ -12,12 +20,22 @@ export async function readJson(request, { maxBytes = 150_000 } = {}) {
   // Do not destroy the socket when rejecting a body: callers must receive JSON errors.
   for await (const piece of request.iterator({ destroyOnReturn: false })) {
     size += piece.length;
-    if (size > maxBytes) { request.resume(); throw new Error("Request body is too large."); }
+    if (size > maxBytes) { request.resume(); throw userError("Request body is too large.", 413); }
     pieces.push(piece);
   }
   try { return JSON.parse(Buffer.concat(pieces).toString()); }
-  catch { throw new Error("Request body must be valid JSON."); }
+  catch { throw userError("Request body must be valid JSON.", 400); }
 }
+
+// DNS rebinding: a hostile page can resolve its own name to this server; the browser then sends that name
+// as Host and Origin, which match each other. Rebinding needs a DNS name, so IP literals and localhost are
+// always this server; other names must be listed in ALLOWED_HOSTS (comma-separated).
+export function allowedHost(host, names) {
+  if (!/^(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::\d{1,5})?$/i.test(host || "")) return false;
+  const hostname = new URL(`http://${host}`).hostname;
+  return isIP(hostname.replace(/^\[|\]$/g, "")) !== 0 || hostname === "localhost" || names.includes(hostname);
+}
+
 
 export function createApp({
   ttsEngine = process.env.TTS_ENGINE || "pocket",
@@ -29,6 +47,8 @@ export function createApp({
   synthesizeChunk,
   rootRedirect,
   experiment = false,
+  allowedHosts = (process.env.ALLOWED_HOSTS || "").split(",").map(name => name.trim().toLowerCase()).filter(Boolean),
+  extraction = {},
   ...streamingOptions
 } = {}) {
   const provider = speechProvider({ ttsEngine, ttsUrl, ttsToken, synthesize });
@@ -36,6 +56,8 @@ export function createApp({
   const voices = new Map(provider.config.voices.map(voice => [voice.id, voice.language]));
   const streaming = createStreamingApi({ ...streamingOptions, voices,
     synthesizeChunk: synthesizeChunk || provider.synthesizeChunk }, readJson);
+  // One extraction worker at a time: each may use a few hundred MB while parsing a page.
+  let extracting = false;
   const server = http.createServer(async (request, response) => {
     const controller = new AbortController();
     request.on?.("aborted", () => controller.abort());
@@ -45,6 +67,9 @@ export function createApp({
       response.end(JSON.stringify(body));
     };
     try {
+      if (!allowedHost(request.headers.host, allowedHosts)) {
+        return json(403, { error: "This host name is not allowed. Add it to ALLOWED_HOSTS to serve it." });
+      }
       const url = new URL(request.url, "http://localhost");
       if (experiment) response.setHeader("X-Reader-Experiment", "continuous-mp3-v1");
       if (request.method === "GET" && url.pathname === "/" && rootRedirect) {
@@ -65,8 +90,14 @@ export function createApp({
       if (request.method === "POST" && url.pathname === "/api/article") {
         const body = await readJson(request);
         if (typeof body?.url !== "string") return json(400, { error: "A webpage URL is required." });
-        const page = await fetchPage(body.url, { signal: controller.signal });
-        return json(200, extractArticle(page.html, page.url));
+        if (extracting) return json(429, { error: "Another article is being read. Please try again shortly." }, { "Retry-After": "2" });
+        extracting = true;
+        try { return json(200, await readArticle(body.url, { fetchPage, signal: controller.signal, ...extraction })); }
+        // article.mjs throws only intentional user-facing messages (validation, fetch, extraction):
+        // unmarked ones default to 422 here; an explicitly marked status passes through, and a
+        // fetch timeout keeps its name so the catch maps it to the generic timeout message.
+        catch (error) { if (error.name !== "TimeoutError") throw userError(error.message, error.status ?? 422); throw error; }
+        finally { extracting = false; }
       }
       if (request.method === "POST" && url.pathname === "/api/tts") {
         const body = await readJson(request);
@@ -76,8 +107,11 @@ export function createApp({
         }
         const upstream = await provider.fetchWav({ text: body.text, voice: body.voice, speed: body.speed },
           AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]));
-        if (!upstream.ok) return json(upstream.status, await upstream.json(),
-          [429, 503].includes(upstream.status) ? { "Retry-After": upstream.headers.get("Retry-After") } : {});
+        if (!upstream.ok) {
+          const retryAfter = upstream.headers.get("Retry-After");
+          const headers = [429, 503].includes(upstream.status) && retryAfter !== null ? { "Retry-After": retryAfter } : {};
+          return json(upstream.status, await upstream.json(), headers);
+        }
         const headers = { "Content-Type": "audio/wav", "Cache-Control": "no-store" };
         for (const name of ["X-Audio-Seconds", "X-Generation-Seconds", "X-RTF", "X-Device"]) {
           const value = upstream.headers.get(name);
@@ -94,15 +128,19 @@ export function createApp({
       if (!path.startsWith(root + sep)) return json(403, { error: "Forbidden." });
       const content = await readFile(path);
       const type = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" }[extname(path)] || "application/octet-stream";
-      response.writeHead(200, { "Content-Type": type, "X-Content-Type-Options": "nosniff" });
+      response.writeHead(200, { "Content-Type": type, "X-Content-Type-Options": "nosniff", "Content-Security-Policy": contentSecurityPolicy });
       response.end(content);
     } catch (error) {
       if (response.headersSent) return response.destroy();
       if (controller.signal.aborted) return;
       if (error.code === "ENOENT") return json(404, { error: "Not found. Run npm run build for the production UI." });
-      const message = error.name === "TimeoutError" ? "The request timed out." : error.message;
-      json(error.status || (request.url.startsWith("/api/tts") ? 502 : 400), { error: message },
+      // Marked errors are intentionally user-facing; anything else is internal and reaches the
+      // client only as a generic message, with its details logged here.
+      if (Number.isSafeInteger(error.status)) return json(error.status, { error: error.message },
         error.status === 429 ? { "Retry-After": "2" } : {});
+      if (error.name !== "TimeoutError") console.error(request.method, request.url, error.name, error.message);
+      json(request.url.startsWith("/api/tts") ? 502 : 400,
+        { error: error.name === "TimeoutError" ? "The request timed out." : "The request could not be completed." });
     }
   });
   server.narrations = streaming.narrations;

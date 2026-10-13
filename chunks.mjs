@@ -72,18 +72,18 @@ export function planNarration(original, { language = "en", firstLimit = 220, lim
       else ranges.push(range);
     }
     for (const range of ranges) {
-      let { value, index } = normalized(text, ...range);
+      const { value, index } = normalized(text, ...range);
       if (current && current.text.length + 1 + value.length > capacity()) flush();
-      while (value.length > capacity()) {
-        let cut = value.slice(0, capacity() + 1).lastIndexOf(" ");
+      // Advance an offset: re-slicing the remainder for every piece was quadratic in sentence length.
+      let at = 0;
+      while (value.length - at > capacity()) {
+        let cut = value.slice(at, at + capacity() + 1).lastIndexOf(" ");
         if (cut <= 0) cut = capacity();
-        add(index[0], index[cut - 1] + 1, value.slice(0, cut));
+        add(index[at], index[at + cut - 1] + 1, value.slice(at, at + cut));
         flush();
-        const next = value[cut] === " " ? cut + 1 : cut;
-        value = value.slice(next);
-        index = index.slice(next);
+        at += value[at + cut] === " " ? cut + 1 : cut;
       }
-      add(index[0], index.at(-1) + 1, value);
+      add(index[at], index.at(-1) + 1, value.slice(at));
     }
   }
   flush();

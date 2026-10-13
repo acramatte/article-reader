@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./csp-fixture.mjs";
 import { paragraphs } from "../fixture.mjs";
 import { nativeTime, bookmark, BOOKMARK_KEY } from "./narration-fixture.mjs";
 
