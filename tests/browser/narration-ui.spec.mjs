@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./csp-fixture.mjs";
 import { mockNarration, deferred, startPasted, nativeTime } from "./narration-fixture.mjs";
 
 // SYNTHETIC/UI-only migration of the former Web Audio startup/tick regressions.

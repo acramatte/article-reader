@@ -12,6 +12,7 @@
 !number-words.mjs
 !tts-client.mjs
 !vite.config.js
+!csp.mjs
 !server.mjs
 !article.mjs
 !isolate.mjs

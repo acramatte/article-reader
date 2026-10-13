@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./csp-fixture.mjs";
 import { mockNarration } from "./narration-fixture.mjs";
 
 for (const action of ["resume", "stop"]) {

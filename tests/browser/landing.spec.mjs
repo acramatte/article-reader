@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./csp-fixture.mjs";
 import { mockNarration, deferred } from "./narration-fixture.mjs";
 
 const article = { title: "The article behind the link", byline: "Extraction fixture", url: "https://example.com/article", text: "Only reveal actual extracted content. This fixture checks the layout transition, not speech quality." };

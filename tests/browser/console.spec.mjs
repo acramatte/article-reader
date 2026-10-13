@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./csp-fixture.mjs";
 
 const articleText = "Listening should be simple. All the controls belong together, so you can pause, continue where you left off, or stop and start again from the beginning.";
 

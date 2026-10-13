@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./csp-fixture.mjs";
 
 test("the page declares a loadable SVG favicon", async ({ page }) => {
   await page.goto("/");
