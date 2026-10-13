@@ -63,7 +63,7 @@ export function createApp({
     request.on?.("aborted", () => controller.abort());
     response.on?.("close", () => { if (!response.writableEnded) controller.abort(); });
     const json = (status, body, headers = {}) => {
-      response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers });
+      response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...headers });
       response.end(JSON.stringify(body));
     };
     try {
@@ -73,7 +73,7 @@ export function createApp({
       const url = new URL(request.url, "http://localhost");
       if (experiment) response.setHeader("X-Reader-Experiment", "continuous-mp3-v1");
       if (request.method === "GET" && url.pathname === "/" && rootRedirect) {
-        response.writeHead(302, { Location: rootRedirect, "Cache-Control": "no-store" });
+        response.writeHead(302, { Location: rootRedirect, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
         return response.end();
       }
       if (["/streaming.html", "/streaming.js", "/streaming-state.js", "/tts-settings.js"].includes(url.pathname)) response.setHeader("Cache-Control", "no-store");
@@ -112,7 +112,7 @@ export function createApp({
           const headers = [429, 503].includes(upstream.status) && retryAfter !== null ? { "Retry-After": retryAfter } : {};
           return json(upstream.status, await upstream.json(), headers);
         }
-        const headers = { "Content-Type": "audio/wav", "Cache-Control": "no-store" };
+        const headers = { "Content-Type": "audio/wav", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
         for (const name of ["X-Audio-Seconds", "X-Generation-Seconds", "X-RTF", "X-Device"]) {
           const value = upstream.headers.get(name);
           if (value) headers[name] = value;
