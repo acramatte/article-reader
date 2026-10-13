@@ -5,6 +5,9 @@ import http from "node:http";
 import { createApp } from "../server.mjs";
 import { html } from "./fixture.mjs";
 import { setTimeout as delay } from "node:timers/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { streamingLimits } from "../streaming-api.mjs";
 
 async function app(t, options = {}) {
@@ -426,4 +429,30 @@ test("hostile narration text is planned off the event loop and rejected promptly
   assert.match((await response.json()).error, /only contains links/);
   assert.ok(performance.now() - started < 5000);
   assert.ok(stall < 250, `event loop stalled ${stall} ms`);
+});
+
+test("static responses carry a strict Content-Security-Policy", async (t) => {
+  const staticDir = await mkdtemp(join(tmpdir(), "reader-static-"));
+  await mkdir(join(staticDir, "assets"));
+  const write = (name, body) => writeFile(join(staticDir, name), body);
+  await Promise.all([
+    write("index.html", '<!doctype html><html><head><style>body{color:#172c31}</style></head><body><script type="module" src="/assets/main.js"></script></body></html>'),
+    write("streaming.html", '<!doctype html><html><head><style>body{color:#e6e8ed}</style></head><body><script type="module" src="/streaming.js"></script></body></html>'),
+    write("assets/main.js", "export {};"),
+    write("streaming.js", "export {};"),
+    write("favicon.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>'),
+  ]);
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const { base } = await streamingReader(t, { staticDir });
+  const directives = [
+    "default-src 'none'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+    "img-src 'self'", "media-src 'self'", "connect-src 'self'", "form-action 'none'",
+    "base-uri 'none'", "frame-ancestors 'none'", "object-src 'none'",
+  ];
+  const expected = directives.join("; ");
+  for (const path of ["/", "/index.html", "/streaming.html", "/favicon.svg", "/assets/main.js", "/streaming.js"]) {
+    const policy = (await fetch(base + path)).headers.get("content-security-policy");
+    // Exact match, not substring: a loosened policy (extra sources or directives) must fail.
+    assert.equal(policy, expected, `${path} must send the strict policy`);
+  }
 });
