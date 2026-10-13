@@ -129,6 +129,7 @@ Set these environment variables on the **Node backend**:
 | `STREAM_RETENTION_MS` | `21600000` | Six-hour retention after generation or a terminal error. |
 | `STREAM_DISCONNECT_MS` | `120000` | Two-minute grace without audio consumers while generating; status requests/SSE do not extend it. |
 | `STREAM_MAX_SESSIONS` | `4` | Retained session limit; inactive terminal sessions may be evicted for admission. |
+| `STREAM_MAX_CONSUMERS` | `4` | Concurrent audio connections per recording; further requests get 429/Retry-After. |
 | `STREAM_SPOOL_DIR` | Instance-specific temporary directory | Dedicated writable spool, exclusive to this server; set an owned bounded tmpfs in read-only containers. |
 
 An external speech endpoint must accept `{text, voice, speed: 1}` JSON with the selected engine's voices and return a complete mono 24-kHz PCM16 `audio/wav` response. Pocket uses `jane`, `bill_boerst` and `estelle`; Kokoro uses `af_heart`, `am_michael` and `ff_siwis`. Pair `TTS_ENGINE`, `TTS_URL` and endpoint credentials when deploying or rolling back (see [deployment](docs/deployment.md#readerinference-pairing)). `/api/config` exposes only public engine/voice metadata and streaming limits, never the endpoint or token. The raw `/api/tts` WAV route accepts only speed 1; adjusted speeds are available through streaming narration. HF's default Transformers runtime is not a drop-in replacement; use a matching custom inference image. If you change the backend `PORT` during development, set `READER_BACKEND_PORT` to the same value when starting Vite.

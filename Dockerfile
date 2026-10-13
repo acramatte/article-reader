@@ -20,7 +20,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force \
     && apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
-COPY server.mjs article.mjs isolate.mjs isolated-worker.mjs streaming-server.mjs streaming.mjs streaming-api.mjs tts-provider.mjs chunks.mjs speech-text.mjs number-words.mjs tts-client.mjs ./
+COPY server.mjs errors.mjs article.mjs isolate.mjs isolated-worker.mjs streaming-server.mjs streaming.mjs streaming-api.mjs tts-provider.mjs chunks.mjs speech-text.mjs number-words.mjs tts-client.mjs ./
 # npm is only needed to install prod deps above; the container runs node
 # only, and the npm bundle ships vulnerable transitive deps, so drop it
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx

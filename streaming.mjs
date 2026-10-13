@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { runIsolated } from "./isolate.mjs";
+import { userError } from "./errors.mjs";
 
 const terminal = state => ["ready", "error", "stopped"].includes(state);
 // Each sentence also carries a pause, so a short one takes longer than its length alone suggests.
@@ -58,16 +59,17 @@ export function mp3Frame(header) {
 
 export class StreamingNarrations {
   constructor({ spoolDir = process.env.STREAM_SPOOL_DIR, synthesizeChunk, ffmpegPath = "ffmpeg", maxAudioBytes = 64_000_000,
-    generationMs = 1_200_000, retentionMs = 21_600_000, disconnectMs = 120_000, maxSessions = 4, maxTextChars = 100_000 }) {
-    for (const [key, value] of Object.entries({ maxAudioBytes, generationMs, retentionMs, disconnectMs, maxSessions })) {
-      if (!Number.isSafeInteger(value) || value < 1 || value > (key === "maxSessions" ? 100 : key === "maxAudioBytes" ? 1_000_000_000 : 604_800_000)) {
+    generationMs = 1_200_000, retentionMs = 21_600_000, disconnectMs = 120_000, maxSessions = 4, maxConsumers = 4,
+    maxTextChars = 100_000 }) {
+    for (const [key, value] of Object.entries({ maxAudioBytes, generationMs, retentionMs, disconnectMs, maxSessions, maxConsumers })) {
+      if (!Number.isSafeInteger(value) || value < 1 || value > (["maxSessions", "maxConsumers"].includes(key) ? 100 : key === "maxAudioBytes" ? 1_000_000_000 : 604_800_000)) {
         throw new Error(`${key} must be a positive bounded integer.`);
       }
     }
     this.defaultSpool = !spoolDir;
     this.spoolRoot = join(tmpdir(), "reader-streaming");
     spoolDir = resolve(spoolDir || join(this.spoolRoot, `instance-${process.pid}-${randomUUID()}`));
-    Object.assign(this, { spoolDir, synthesizeChunk, ffmpegPath, maxAudioBytes, generationMs, retentionMs, disconnectMs, maxSessions });
+    Object.assign(this, { spoolDir, synthesizeChunk, ffmpegPath, maxAudioBytes, generationMs, retentionMs, disconnectMs, maxSessions, maxConsumers });
     // Dense rewrites (e.g. phone numbers) need up to ~250 bytes of planning heap per character.
     this.planHeapMb = Math.max(128, Math.ceil(maxTextChars / 3500));
     this.sessions = new Map();
@@ -77,9 +79,9 @@ export class StreamingNarrations {
   }
 
   async create(body) {
-    if (this.closed) throw Object.assign(new Error("Narration server is shutting down."), { status: 503 });
+    if (this.closed) throw userError("Narration server is shutting down.", 503);
     if (this.creating || [...this.sessions.values()].some(s => !terminal(s.state))) {
-      throw Object.assign(new Error("Another narration is generating. Stop it or wait for completion."), { status: 429 });
+      throw userError("Another narration is generating. Stop it or wait for completion.", 429);
     }
     this.creating = true;
     try { return await (this.creation = this.createSession(body)); }
@@ -128,14 +130,14 @@ export class StreamingNarrations {
     const chunks = plan.chunks.map(chunk => chunk.text);
     if (!chunks.length) {
       // Reference URLs are not narrated, so text can have letters and still nothing to say.
-      throw Object.assign(new Error(/[\p{L}\p{N}]/u.test(text) ? "Nothing to narrate: the text only contains links."
-        : "Narration requires at least one letter or number."), { status: 400 });
+      throw userError(/[\p{L}\p{N}]/u.test(text) ? "Nothing to narrate: the text only contains links."
+        : "Narration requires at least one letter or number.", 400);
     }
     await (this.spoolReady ??= this.prepareSpool());
-    if (this.closed) throw Object.assign(new Error("Narration server is shutting down."), { status: 503 });
+    if (this.closed) throw userError("Narration server is shutting down.", 503);
     if (this.sessions.size >= this.maxSessions) {
       const oldest = [...this.sessions.values()].find(s => !s.consumers && terminal(s.state));
-      if (!oldest) throw Object.assign(new Error("Streaming session capacity reached."), { status: 429 });
+      if (!oldest) throw userError("Streaming session capacity reached.", 429);
       await this.stop(oldest);
       this.sessions.delete(oldest.id);
     }
@@ -213,7 +215,7 @@ export class StreamingNarrations {
 
   async events(session, response) {
     if (session.subscribers.size + session.replaying >= 4) {
-      throw Object.assign(new Error("Too many status connections for this recording."), { status: 429 });
+      throw userError("Too many status connections for this recording.", 429);
     }
     response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store, no-transform",
       "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff" });
@@ -428,6 +430,11 @@ export class StreamingNarrations {
   // `startSeconds` serves the same recording from a frame boundary, for recovery while it is
   // still growing: browsers cannot seek a growing MP3 of unknown length without reading its prefix.
   async audio(session, request, response, { startSeconds = 0 } = {}) {
+    // Rejected before incrementing: the caller has not begun an audio response, so it can
+    // still send a plain JSON error. The disconnect handler is not armed for rejected clients.
+    if (session.consumers >= this.maxConsumers) {
+      throw userError("Too many audio connections for this recording.", 429);
+    }
     const controller = new AbortController();
     const signal = controller.signal;
     const disconnected = () => controller.abort();

@@ -4,5 +4,5 @@ import { parentPort, workerData } from "node:worker_threads";
 const exports = await import(workerData.module);
 parentPort.once("message", async args => {
   try { parentPort.postMessage({ value: await exports[workerData.name](...args) }); }
-  catch (error) { parentPort.postMessage({ error: error.message }); }
+  catch (error) { parentPort.postMessage({ error: error.message, status: Number.isInteger(error.status) ? error.status : undefined }); }
 });

@@ -80,9 +80,9 @@ test("full-length Unicode/escaped JSON fits streaming body bounds; legacy byte b
   ({ id } = await response.json());
   await post(`/api/streaming/${id}/stop`, {});
   response = await post("/api/streaming", { text: "x".repeat(700000), voice: "jane", speed: 1 });
-  assert.equal(response.status, 400); assert.match((await response.json()).error, /body is too large/);
+  assert.equal(response.status, 413); assert.match((await response.json()).error, /body is too large/);
   response = await post("/api/article", { url: "https://example.com", padding: "x".repeat(150000) });
-  assert.equal(response.status, 400); assert.match((await response.json()).error, /body is too large/);
+  assert.equal(response.status, 413); assert.match((await response.json()).error, /body is too large/);
   assert.equal(server.narrations.sessions.size, 2);
   const limited = await streamingReader(t, { maxTextChars: 7000 });
   assert.equal((await limited.post("/api/streaming", { text: "x".repeat(7001), voice: "jane", speed: 1 })).status, 400);
@@ -132,12 +132,14 @@ test("escaped maximum metadata fits the body bound alongside maximum narration t
 
 test("stream environment overrides reject malformed, nonpositive and unreasonable limits", () => {
   assert.deepEqual(streamingLimits({}, {}), { maxTextChars: 100000, maxAudioBytes: 64000000, generationMs: 1200000,
-    retentionMs: 21600000, disconnectMs: 120000, maxSessions: 4 });
+    retentionMs: 21600000, disconnectMs: 120000, maxSessions: 4, maxConsumers: 4 });
   for (const value of ["", "0", "-1", "1.5", "1e3", " 10", "10junk", "Infinity", "9999999999999"]) {
     assert.throws(() => streamingLimits({}, { STREAM_GENERATION_MS: value }), /STREAM_GENERATION_MS/);
   }
   assert.equal(streamingLimits({}, { STREAM_RETENTION_MS: "1234" }).retentionMs, 1234);
+  assert.equal(streamingLimits({}, { STREAM_MAX_CONSUMERS: "9" }).maxConsumers, 9);
   assert.throws(() => createApp({ maxTextChars: 0 }), /STREAM_MAX_TEXT_CHARS/);
+  assert.throws(() => createApp({ maxConsumers: 0 }), /STREAM_MAX_CONSUMERS/);
 });
 
 test("normal streaming shares the server-side provider and rejects non-WAV", async t => {
@@ -262,8 +264,40 @@ test("API rejects invalid requests and cross-origin browser calls", async (t) =>
   for (const body of [null, {}, { text: "", voice: "jane", speed: 1 }, { text: "x".repeat(1001), voice: "jane", speed: 1 }, { text: "Hi", voice: "unknown", speed: 1 }, { text: "Hi", voice: "jane", speed: 3 }]) assert.equal((await post("/api/tts", body)).status, 400);
   assert.equal((await post("/api/tts", { text: "«»“”()[] — *** 🎵", voice: "estelle", speed: 1 })).status, 400);
   assert.equal((await post("/api/article", {})).status, 400);
-  assert.equal((await post("/api/article", { url: "http://localhost" })).status, 400);
+  // Fetch-time rejections (validateUrl, SSRF) stay user-facing, marked as client errors at their source.
+  const local = await post("/api/article", { url: "http://localhost" });
+  assert.equal(local.status, 400);
+  assert.match((await local.json()).error, /not allowed/);
+  const file = await post("/api/article", { url: "file:///etc/passwd" });
+  assert.equal(file.status, 400);
+  assert.equal((await file.json()).error, "Only HTTP/HTTPS URLs on standard ports without credentials are supported.");
   assert.equal((await post("/api/article", {}, { Origin: "https://evil.example" })).status, 403);
+});
+
+test("unexpected errors return generic messages, while extraction errors stay user-facing", async (t) => {
+  const lines = [];
+  const consoleError = console.error;
+  t.after(() => { console.error = consoleError; });
+  console.error = (...parts) => lines.push(parts.join(" "));
+  // A malformed static path once leaked the resolved absolute filesystem path in error.message.
+  const { base, post } = await streamingReader(t, { staticDir: "dist" });
+  for (const path of ["/a%00b", "/a%zzb"]) {
+    const response = await fetch(base + path);
+    const problem = await response.json();
+    assert.equal(response.status, 400);
+    assert.equal(problem.error, "The request could not be completed.");
+    assert.match(lines.at(-1), new RegExp(`^GET ${path} `), "details are logged server-side");
+    assert.doesNotMatch(problem.error, /workspace|dist|Received|URI/);
+  }
+  // article.mjs and its injected fetchPage throw only user-facing extraction/fetch messages.
+  const extraction = await app(t, { fetchPage: async () => ({ html: "<html><p>x</p></html>", url: "https://example.com/story" }) });
+  const article = await extraction("/api/article", { url: "https://example.com/story" });
+  assert.equal(article.status, 422);
+  assert.match((await article.json()).error, /readable|enough/);
+  const timeout = await app(t, { fetchPage: async () => { throw Object.assign(new DOMException("hung", "TimeoutError")); } });
+  const expired = await timeout("/api/article", { url: "https://example.com/story" });
+  assert.equal(expired.status, 400);
+  assert.equal((await expired.json()).error, "The request timed out.");
 });
 
 test("upstream 503 exposes only a retryable code and Retry-After, not provider details", async (t) => {

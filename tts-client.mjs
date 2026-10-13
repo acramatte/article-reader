@@ -1,3 +1,5 @@
+import { userError } from "./errors.mjs";
+
 function wait(ms, signal) {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
@@ -36,9 +38,9 @@ export async function synthesizeSpeech(body, signal, onWaiting = () => {}, {
       const problem = await response.json().catch(() => ({}));
       busy = response.status === 429 && problem.code === "INFERENCE_BUSY";
       if (!busy && (response.status !== 503 || problem.code !== "INFERENCE_UNAVAILABLE")) {
-        throw new Error(problem.error || `Speech request failed (HTTP ${response.status}).`);
+        throw userError(problem.error || `Speech request failed (HTTP ${response.status}).`, 502);
       }
-      if (!busy && ++attempt === maxAttempts) throw new Error("Speech engine is still unavailable. Please try again shortly.");
+      if (!busy && ++attempt === maxAttempts) throw userError("Speech engine is still unavailable. Please try again shortly.", 503);
       // A busy engine has started; only startup waits are shown as warming.
       onWaiting(!busy);
       // Busy slots free within a chunk, so poll at 1–2 seconds rather than backing off to 10.

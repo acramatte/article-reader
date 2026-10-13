@@ -1,4 +1,5 @@
 import { synthesizeSpeech } from "./tts-client.mjs";
+import { userError } from "./errors.mjs";
 
 const transportCodes = new Set(["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]);
 
@@ -28,7 +29,7 @@ export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthes
       body: JSON.stringify(body), signal,
     }).catch(error => {
       // Surface bounded error codes, never endpoint URLs, headers or raw transport diagnostics.
-      if (transportCodes.has(error.cause?.code)) throw new Error(`Speech engine connection failed (${error.cause.code}).`, { cause: error });
+      if (transportCodes.has(error.cause?.code)) throw userError(`Speech engine connection failed (${error.cause.code}).`, 502);
       throw error;
     });
     if (!upstream.ok) {
@@ -38,6 +39,8 @@ export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthes
         503: { code: "INFERENCE_UNAVAILABLE", error: "Speech engine is temporarily unavailable or starting up." },
         429: { code: "INFERENCE_BUSY", error: `${config.name} is busy with other speech. Please try again shortly.` },
       }[upstream.status];
+      // The crafted body is itself the user-facing error; the /api/tts route relays it directly,
+      // outside the generic catch, so no marking is needed here.
       return new Response(JSON.stringify(retryable || { error: `${config.name} returned HTTP ${upstream.status}.` }), {
         status: retryable ? upstream.status : 502,
         headers: { "Content-Type": "application/json", "Retry-After": upstream.headers.get("Retry-After") || "2" },
@@ -45,13 +48,13 @@ export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthes
     }
     if (!/^audio\/wav(?:;|$)/i.test(upstream.headers.get("content-type") || "")) {
       await upstream.body?.cancel();
-      throw new Error(`${config.name} did not return WAV audio.`);
+      throw userError(`${config.name} did not return WAV audio.`, 502);
     }
     const pieces = [];
     let size = 0;
     for await (const piece of upstream.body) {
       size += piece.length;
-      if (size > 12_000_000) throw new Error("TTS audio exceeded the size limit.");
+      if (size > 12_000_000) throw userError("TTS audio exceeded the size limit.", 502);
       pieces.push(piece);
     }
     const headers = { "Content-Type": "audio/wav" };

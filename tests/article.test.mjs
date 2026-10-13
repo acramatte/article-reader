@@ -57,7 +57,12 @@ test("narration plan maps every chunk to whole sentences given as source ranges"
 test("URL and IP validation rejects SSRF targets, credentials, schemes, and ports", async () => {
   for (const url of ["file:///etc/passwd", "ftp://example.com", "https://name:pass@example.com", "http://example.com:8000", "bad"]) assert.throws(() => validateUrl(url));
   for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "0.0.0.0", "::1", "fc00::1", "fe80::1", "::ffff:127.0.0.1", "224.0.0.1"]) assert.equal(isPublicAddress(ip), false, ip);
+  // IPv4-compatible IPv6 (::/96) embeds an IPv4 address without the ::ffff: mapped prefix.
+  for (const ip of ["::7f00:1", "::127.0.0.1", "::a9fe:a9fe", "::169.254.169.254", "::c0a8:1"]) assert.equal(isPublicAddress(ip), false, ip);
+  // Transition ranges (NAT64, 6to4, Teredo) embed IPv4 too.
+  for (const ip of ["64:ff9b::7f00:1", "64:ff9b:1::7f00:1", "2002:7f00:1::", "2001::7f00:1"]) assert.equal(isPublicAddress(ip), false, ip);
   assert.equal(isPublicAddress("8.8.8.8"), true);
+  assert.equal(isPublicAddress("2606:4700:4700::8888"), true);
   await assert.rejects(publicTarget(new URL("https://example.com"), async () => [{ address: "8.8.8.8", family: 4 }, { address: "127.0.0.1", family: 4 }]), /not allowed/);
   await assert.rejects(publicTarget(new URL("http://[::1]")), /not allowed/);
 });
