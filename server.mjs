@@ -4,8 +4,14 @@ import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchArticleHtml, readArticle } from "./article.mjs";
+import { userError } from "./errors.mjs";
 import { speechProvider } from "./tts-provider.mjs";
 import { createStreamingApi } from "./streaming-api.mjs";
+
+// User-facing errors are marked explicitly: an integer `status` property means the message is
+// safe to show (validation, extraction, bounded upstream rejections). Everything else is internal;
+// the client gets a generic message and the server logs the details. See errors.mjs.
+export { userError } from "./errors.mjs";
 
 export async function readJson(request, { maxBytes = 150_000 } = {}) {
   let size = 0;
@@ -13,11 +19,11 @@ export async function readJson(request, { maxBytes = 150_000 } = {}) {
   // Do not destroy the socket when rejecting a body: callers must receive JSON errors.
   for await (const piece of request.iterator({ destroyOnReturn: false })) {
     size += piece.length;
-    if (size > maxBytes) { request.resume(); throw new Error("Request body is too large."); }
+    if (size > maxBytes) { request.resume(); throw userError("Request body is too large.", 413); }
     pieces.push(piece);
   }
   try { return JSON.parse(Buffer.concat(pieces).toString()); }
-  catch { throw new Error("Request body must be valid JSON."); }
+  catch { throw userError("Request body must be valid JSON.", 400); }
 }
 
 // DNS rebinding: a hostile page can resolve its own name to this server; the browser then sends that name
@@ -85,6 +91,10 @@ export function createApp({
         if (extracting) return json(429, { error: "Another article is being read. Please try again shortly." }, { "Retry-After": "2" });
         extracting = true;
         try { return json(200, await readArticle(body.url, { fetchPage, signal: controller.signal, ...extraction })); }
+        // article.mjs throws only intentional user-facing messages (validation, fetch, extraction):
+        // unmarked ones default to 422 here; an explicitly marked status passes through, and a
+        // fetch timeout keeps its name so the catch maps it to the generic timeout message.
+        catch (error) { if (error.name !== "TimeoutError") throw userError(error.message, error.status ?? 422); throw error; }
         finally { extracting = false; }
       }
       if (request.method === "POST" && url.pathname === "/api/tts") {
@@ -95,8 +105,11 @@ export function createApp({
         }
         const upstream = await provider.fetchWav({ text: body.text, voice: body.voice, speed: body.speed },
           AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]));
-        if (!upstream.ok) return json(upstream.status, await upstream.json(),
-          [429, 503].includes(upstream.status) ? { "Retry-After": upstream.headers.get("Retry-After") } : {});
+        if (!upstream.ok) {
+          const retryAfter = upstream.headers.get("Retry-After");
+          const headers = [429, 503].includes(upstream.status) && retryAfter !== null ? { "Retry-After": retryAfter } : {};
+          return json(upstream.status, await upstream.json(), headers);
+        }
         const headers = { "Content-Type": "audio/wav", "Cache-Control": "no-store" };
         for (const name of ["X-Audio-Seconds", "X-Generation-Seconds", "X-RTF", "X-Device"]) {
           const value = upstream.headers.get(name);
@@ -119,9 +132,13 @@ export function createApp({
       if (response.headersSent) return response.destroy();
       if (controller.signal.aborted) return;
       if (error.code === "ENOENT") return json(404, { error: "Not found. Run npm run build for the production UI." });
-      const message = error.name === "TimeoutError" ? "The request timed out." : error.message;
-      json(error.status || (request.url.startsWith("/api/tts") ? 502 : 400), { error: message },
+      // Marked errors are intentionally user-facing; anything else is internal and reaches the
+      // client only as a generic message, with its details logged here.
+      if (Number.isSafeInteger(error.status)) return json(error.status, { error: error.message },
         error.status === 429 ? { "Retry-After": "2" } : {});
+      if (error.name !== "TimeoutError") console.error(request.method, request.url, error.name, error.message);
+      json(request.url.startsWith("/api/tts") ? 502 : 400,
+        { error: error.name === "TimeoutError" ? "The request timed out." : "The request could not be completed." });
     }
   });
   server.narrations = streaming.narrations;

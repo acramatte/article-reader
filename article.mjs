@@ -5,19 +5,26 @@ import ipaddr from "ipaddr.js";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { runIsolated } from "./isolate.mjs";
+import { userError } from "./errors.mjs";
 
 export function validateUrl(value) {
   let url;
-  try { url = new URL(value); } catch { throw new Error("Enter a valid HTTP or HTTPS URL."); }
+  try { url = new URL(value); } catch { throw userError("Enter a valid HTTP or HTTPS URL.", 400); }
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
       (url.port && !["80", "443"].includes(url.port))) {
-    throw new Error("Only HTTP/HTTPS URLs on standard ports without credentials are supported.");
+    throw userError("Only HTTP/HTTPS URLs on standard ports without credentials are supported.", 400);
   }
   return url;
 }
 
 export function isPublicAddress(address) {
-  try { return ipaddr.process(address).range() === "unicast"; } catch { return false; }
+  try {
+    const ip = ipaddr.process(address);
+    // IPv4-compatible IPv6 (::/96, e.g. ::7f00:1) hides an IPv4 address in its tail,
+    // which ipaddr.js still ranks unicast; reject the whole range like that IPv4.
+    if (ip.kind() === "ipv6" && ip.parts.slice(0, 6).every(part => part === 0)) return false;
+    return ip.range() === "unicast";
+  } catch { return false; }
 }
 
 export async function publicTarget(url, resolve = lookup) {
@@ -26,7 +33,7 @@ export async function publicTarget(url, resolve = lookup) {
     ? [{ address: hostname, family: ipaddr.parse(hostname).kind() === "ipv6" ? 6 : 4 }]
     : await resolve(hostname, { all: true, verbatim: true });
   if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
-    throw new Error("Private, local, and reserved network addresses are not allowed.");
+    throw userError("Private, local, and reserved network addresses are not allowed.", 400);
   }
   return addresses[0];
 }

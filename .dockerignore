@@ -16,6 +16,7 @@
 !article.mjs
 !isolate.mjs
 !isolated-worker.mjs
+!errors.mjs
 !streaming-server.mjs
 !streaming.mjs
 !streaming-api.mjs

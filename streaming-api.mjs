@@ -1,4 +1,5 @@
 import { StreamingNarrations } from "./streaming.mjs";
+import { userError } from "./errors.mjs";
 
 const metadataLimits = { title: 200, byline: 500, sourceUrl: 2048 };
 const metadataBodyBytes = 6 * Object.values(metadataLimits).reduce((sum, size) => sum + size, 0) + 1024;
@@ -10,6 +11,7 @@ const limits = {
   retentionMs: ["STREAM_RETENTION_MS", 21_600_000, 604_800_000],
   disconnectMs: ["STREAM_DISCONNECT_MS", 120_000, 86_400_000],
   maxSessions: ["STREAM_MAX_SESSIONS", 4, 100],
+  maxConsumers: ["STREAM_MAX_CONSUMERS", 4, 100],
 };
 
 export function streamingLimits(options = {}, env = process.env) {
@@ -27,18 +29,18 @@ function validate(body, maxTextChars, voices) {
   if (typeof body?.text !== "string" || !body.text.trim() || body.text.length > maxTextChars ||
       !voices.has(body.voice) || typeof body.speed !== "number" || !Number.isFinite(body.speed) || body.speed < 0.5 || body.speed > 2 ||
       (body.paceSeconds !== undefined && (!Number.isInteger(body.paceSeconds) || body.paceSeconds < 0 || body.paceSeconds > 8))) {
-    throw new Error(`Streaming requires 1–${maxTextChars} characters, a supported voice, speed 0.5–2 and pacing 0–8 seconds.`);
+    throw userError(`Streaming requires 1–${maxTextChars} characters, a supported voice, speed 0.5–2 and pacing 0–8 seconds.`, 400);
   }
   for (const [key, max] of Object.entries(metadataLimits)) {
     if (body[key] !== undefined && (typeof body[key] !== "string" || body[key].length > max)) {
-      throw new Error(`${key} must be a string of at most ${max} characters.`);
+      throw userError(`${key} must be a string of at most ${max} characters.`, 400);
     }
   }
   if (body.sourceUrl !== undefined) {
     let url;
-    try { url = new URL(body.sourceUrl); } catch { throw new Error("sourceUrl must be an HTTP(S) URL without credentials."); }
+    try { url = new URL(body.sourceUrl); } catch { throw userError("sourceUrl must be an HTTP(S) URL without credentials.", 400); }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
-      throw new Error("sourceUrl must be an HTTP(S) URL without credentials.");
+      throw userError("sourceUrl must be an HTTP(S) URL without credentials.", 400);
     }
   }
 }
