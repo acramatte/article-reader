@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./csp-fixture.mjs";
 import { mockNarration, startPasted } from "./narration-fixture.mjs";
 
 // SYNTHETIC/UI-only: sentence offsets and times are given by the fixture, not derived from speech.

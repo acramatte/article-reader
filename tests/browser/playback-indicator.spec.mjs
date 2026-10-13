@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./csp-fixture.mjs";
 import { mockNarration, mediaEvent, finishNativeFixture } from "./narration-fixture.mjs";
 
 for (const width of [1280, 390, 320]) {

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./csp-fixture.mjs";
 import { writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 
