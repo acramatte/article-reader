@@ -35,6 +35,21 @@ export function allowedHost(host, names) {
   return isIP(hostname.replace(/^\[|\]$/g, "")) !== 0 || hostname === "localhost" || names.includes(hostname);
 }
 
+// The static UI needs same-origin script/media/connect/img and the built pages' inline
+// <style> blocks; everything else stays denied (no framing, no plugins, no base hijack).
+const staticCsp = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self'",
+  "media-src 'self'",
+  "connect-src 'self'",
+  "form-action 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+].join("; ");
+
 export function createApp({
   ttsEngine = process.env.TTS_ENGINE || "pocket",
   ttsUrl = process.env.TTS_URL || "http://127.0.0.1:8000/tts",
@@ -126,7 +141,7 @@ export function createApp({
       if (!path.startsWith(root + sep)) return json(403, { error: "Forbidden." });
       const content = await readFile(path);
       const type = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" }[extname(path)] || "application/octet-stream";
-      response.writeHead(200, { "Content-Type": type, "X-Content-Type-Options": "nosniff" });
+      response.writeHead(200, { "Content-Type": type, "X-Content-Type-Options": "nosniff", "Content-Security-Policy": staticCsp });
       response.end(content);
     } catch (error) {
       if (response.headersSent) return response.destroy();
