@@ -15,6 +15,7 @@ The primary user is a reader on desktop or mobile; operators need bounded resour
 - Pocket TTS is the default; Kokoro is opt-in. Engine, voice catalog and endpoint must match; there is no automatic detection or failover.
 - Sessions belong to one reader process. There is no durable database, distributed session routing, cross-tab coordination or offline narration.
 - Only one narration may generate per reader instance, with no admission waiting queue. Inference capacity is a separate constraint.
+- The reader answers only to IP literals, `localhost`, and names listed in `ALLOWED_HOSTS`; every page carries a strict Content-Security-Policy; internal errors are logged with details and returned generically.
 
 ## 3. Context and scope
 
@@ -39,11 +40,13 @@ Extract once, prepare speech without changing displayed text, then synthesize sm
 flowchart TD
     UI[main.js: reader UI] --> Player[stream-player.mjs: media and recovery]
     UI --> Highlight[narration-highlight.mjs: sentence highlighting]
-    Player --> HTTP[server.mjs: HTTP and static assets]
-    HTTP --> Article[article.mjs: safe fetch and Readability]
+    Player --> HTTP[server.mjs: HTTP, static assets and policy]
+    HTTP -->|extraction| Isolate[isolate.mjs: bounded worker, one at a time]
+    Isolate --> Article[article.mjs: safe fetch and Readability]
     HTTP --> API[streaming-api.mjs: validation and routes]
     API --> Sessions[streaming.mjs: sessions, SSE, spool and audio]
-    Sessions --> Chunks[chunks.mjs: paragraphs and sentences]
+    Sessions -->|narration planning| Isolate
+    Isolate --> Chunks[chunks.mjs: paragraphs and sentences]
     Chunks --> Speech[speech-text.mjs and number-words.mjs]
     HTTP --> Provider[tts-provider.mjs: engine and WAV boundary]
     Sessions --> Provider
@@ -57,6 +60,8 @@ flowchart TD
 `server.mjs` exposes `/api/config`, `/api/article`, `/api/health`, the compatibility `/api/tts` WAV route and streaming routes. `/api/health` checks the reader, not inference. Compatibility WAV accepts 1–1,000 characters containing a letter/number, a supported voice and speed 1; the reader's normal narration uses `/api/streaming`.
 
 `streaming-api.mjs` validates admission and bounded metadata (title 200, byline 500, source URL 2,048 characters). `streaming.mjs` owns the session map, admission exclusion, encoder lifetime, temporary files, subscribers, generation/retention timers and audio consumers. `tts-provider.mjs` keeps credentials server-side, rejects redirects and non-WAV responses, bounds each returned WAV at 12,000,000 bytes, and supplies the configured voice catalog.
+
+`errors.mjs` marks user-facing messages with an HTTP status; anything unmarked is internal, returned as a generic message and logged with details. `csp.mjs` supplies one Content-Security-Policy shared by `server.mjs` and the Vite dev server, so development runs under the production policy. `isolate.mjs` runs extraction and narration planning in fresh worker threads with heap and time budgets, so hostile input can exhaust only its own worker, never the server's event loop.
 
 ## 6. Runtime view
 
@@ -92,7 +97,7 @@ sequenceDiagram
     N-->>B: Final ready status and close SSE
 ```
 
-Generation begins before the admission response and continues independently of status delivery. Chunk progress/timings mean PCM has entered the encoder, not necessarily that every corresponding MP3 byte has already emerged. The final ready snapshot follows complete encoder output.
+Generation begins before the admission response and continues independently of status delivery. Chunk progress/timings mean PCM has entered the encoder, not necessarily that every corresponding MP3 byte has already emerged. The final ready snapshot follows complete encoder output. Extraction and narration planning never run on the event loop: each runs once in a bounded worker (see building blocks), so pathological input fails with a user-facing error instead of blocking requests.
 
 ### SSE and timing contract
 
@@ -192,15 +197,19 @@ Everything not covered stays as written: identifiers and codes like `d1-3B`, `Ph
 
 ### Lifetime, resource limits and privacy
 
-Default configurable narration limits are 100,000 text characters, 64,000,000 audio bytes per recording, 20 minutes generation, six hours retention after ready/error, two minutes without audio consumers while generating, and four session slots. Only one slot can generate. At capacity, admission evicts the oldest terminal session with no audio consumers or rejects with 429 if none qualifies. Optional pacing is an integer 0–8 seconds between chunks; it does not remove generation deadlines. See [backend configuration](development.md#backend-configuration) for environment names and bounds.
+Default configurable narration limits are 100,000 text characters, 64,000,000 audio bytes per recording, 20 minutes generation, six hours retention after ready/error, two minutes without audio consumers while generating, at most four concurrent audio connections per recording (`STREAM_MAX_CONSUMERS`), and four session slots. Only one slot can generate. Narration planning runs in a bounded worker whose heap scales with the text limit (about 290 MB at 1,000,000 characters) under a 20-second deadline. At capacity, admission evicts the oldest terminal session with no audio consumers or rejects with 429 if none qualifies. Optional pacing is an integer 0–8 seconds between chunks; it does not remove generation deadlines. See [backend configuration](development.md#backend-configuration) for environment names and bounds.
 
 Text/metadata live temporarily in the process; MP3 lives in a private instance-owned spool (directory mode 0700, file mode 0600). Session/spool ownership locks prevent two processes sharing the same spool. Startup cleans abandoned/default instance spools and old session directories in its owned spool; restart never restores sessions. Ready keeps bounded recovery content; error/Stop discards text and audio. Error snapshots remain temporarily for diagnosis. Stop removes the recording; retention expiry also removes the session; shutdown stops all sessions.
 
 Browser storage holds only a validated recording reference, title and best-known playback position, not article text or audio. Completion/Stop clears its bookmark. Credentials never enter browser configuration. Remote inference receives text; operators with Docker access can inspect container credentials. Same-origin checks reject cross-origin/cross-site streaming reads and writes, and POSTs require JSON; these are not per-user authorization or abuse controls.
 
+Requests whose `Host` header is neither an IP literal, `localhost` nor a name listed in `ALLOWED_HOSTS` are rejected with 403, so a page that rebinds its own DNS name to this server cannot drive the API from a victim's browser. Every page response carries a strict Content-Security-Policy — same-origin scripts, styles, media, connect and images only; no framing, forms, plugins or base-URI override — in development and production alike. Internal errors are logged with details and returned to clients as generic messages; only errors explicitly marked with an HTTP status are shown.
+
 ### Safe article extraction and inference errors
 
-Article fetch accepts public HTTP/HTTPS URLs on standard ports 80/443 without credentials. Every DNS result must be public unicast: private, loopback, link-local and reserved addresses are rejected. The selected checked IP is pinned to the connection, and redirects are revalidated. Limits are a 15-second overall fetch deadline, five redirects and 3,000,000 HTML bytes. Only HTML/XHTML with identity encoding is accepted; UTF-8 is assumed. JSDOM executes neither scripts nor remote resources; Readability parses at most 50,000 elements, and extracted text must be 80–100,000 characters. This cannot unlock paywalls or reliably extract JS-rendered pages or remove every consent/ad fragment; paste is the fallback.
+Article fetch accepts public HTTP/HTTPS URLs on standard ports 80/443 without credentials. Every DNS result must be public unicast: private, loopback, link-local and reserved addresses are rejected, including IPv4-compatible IPv6 such as `::7f00:1` whose tail hides an IPv4 address. The selected checked IP is pinned to the connection, and redirects are revalidated. Limits are a 15-second overall fetch deadline, five redirects and 3,000,000 HTML bytes. Only HTML/XHTML with identity encoding is accepted; UTF-8 is assumed.
+
+Parsing and extraction never run on the event loop. Each page is read in one fresh worker thread (256 MiB heap, 10-second deadline), and only one extraction runs at a time: concurrent requests get 429/Retry-After. Readability parses at most 50,000 elements, and nesting beyond 400 levels is rejected because Readability's cost grows roughly cubically with nesting depth. Extracted text must be 80–100,000 characters. A hostile page fails its own extraction with a user-facing error (422) instead of exhausting the container. This cannot unlock paywalls or reliably extract JS-rendered pages or remove every consent/ad fragment; paste is the fallback.
 
 The provider exposes bounded errors without leaking endpoint credentials/transport details. Narration retries only explicit pre-synthesis 503 `INFERENCE_UNAVAILABLE` and 429 `INFERENCE_BUSY` responses, respecting `Retry-After`; transport failures that may have synthesized are not retried. Per-chunk waits have a shared 180-second deadline, with at most 20 startup attempts; busy retries share the deadline. Warmup is distinct from busy waiting. These limits also sit inside the narration's overall generation deadline.
 
@@ -214,6 +223,9 @@ The provider exposes bounded errors without leaking endpoint credentials/transpo
 | Separate speech and displayed text | Deterministic pronunciation improvements preserve original-source highlighting; mapping and timing estimates must remain coordinated. |
 | Temporary instance-local recordings | Simple bounded recovery without durable persistence; restart/rollout loses recordings and horizontal sharing is absent. |
 | Explicit engine pairing | Small supported catalogs and a strict WAV boundary; incompatible reader/endpoint combinations fail rather than auto-switch. |
+| Bounded isolation workers | Extraction and narration planning face hostile input; a fresh worker with heap/time budgets fails the request instead of the process or event loop. |
+| Host allowlist and strict CSP | A DNS rebind cannot match the allowlist, and pages admit only same-origin resources; both policies apply identically in development and production. |
+| Explicit user vs. internal errors | Only messages marked with an HTTP status reach clients; internal details stay in logs. |
 
 Historical alternatives, measurements and their caveats belong in [experiments](experiments.md), [streaming spike](streaming-spike.md) and [HF inference](hf-inference.md), not duplicated benchmark tables here. The old `main_.js` browser-inference experiment is not loaded; its removed `kokoro-js` dependency would need separate installation to revisit it.
 

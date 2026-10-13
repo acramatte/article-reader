@@ -60,7 +60,7 @@ For hot-reload development, [run Node and Vite separately](docs/development.md#d
 - Recordings are temporary and instance-local: server restarts discard them, and retention/capacity limits can expire them. Use one playback tab; cross-tab coordination, offline narration, and arbitrary seeking in growing streams are not provided. Saved positions may lag while mobile JavaScript is frozen.
 - Sustained inference sizing remains unverified. Pocket passed a bounded local run; retained Kokoro has observed CPU memory growth/OOM. See [experiments and benchmarks](docs/experiments.md).
 
-**Do not expose the app publicly as-is.** It has no built-in user authentication or per-user rate limits. Keep the reader behind a VPN or another access-control layer, and local inference bound to loopback. The supplied Compose setup is a WireGuard deployment template, not proof of a production rollout; see the [deployment runbook](docs/deployment.md).
+**Do not expose the app publicly as-is.** It has no built-in user authentication or per-user rate limits. Keep the reader behind a VPN or another access-control layer, and local inference bound to loopback. The reader already answers only to IP literals, `localhost`, and names listed in `ALLOWED_HOSTS` (blocking DNS-rebinding pages), and serves a strict Content-Security-Policy, including in development. The supplied Compose setup is a WireGuard deployment template, not proof of a production rollout; see the [deployment runbook](docs/deployment.md).
 
 ## Documentation
 

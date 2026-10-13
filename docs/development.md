@@ -33,12 +33,14 @@ Set these environment variables on the **Node backend**, not Vite:
 | `TTS_TOKEN` | Unset | Optional server-side Bearer token. Never use a `VITE_*` variable for it. |
 | `PORT` | `3001` | Reader backend port. |
 | `HOST` | `127.0.0.1` | Reader backend bind address. |
-| `STREAM_MAX_TEXT_CHARS` | `100000` | Narration text limit; extraction separately caps article text at 100,000 characters. |
+| `ALLOWED_HOSTS` | Unset | Comma-separated host names the reader answers to, besides IP addresses and `localhost` (always allowed). Other `Host` headers get 403, which blocks DNS-rebinding pages. Set it when browsing the reader by name, e.g. `reader.example.internal`. |
+| `STREAM_MAX_TEXT_CHARS` | `100000` | Narration text limit; extraction separately caps article text at 100,000 characters. Text is planned in a worker whose heap scales with this limit (about 290 MB at 1,000,000). |
 | `STREAM_MAX_AUDIO_BYTES` | `64000000` | Encoded bytes per recording. |
 | `STREAM_GENERATION_MS` | `1200000` | Twenty-minute synthesis/encoding deadline. |
 | `STREAM_RETENTION_MS` | `21600000` | Six-hour retention after generation or a terminal error. |
 | `STREAM_DISCONNECT_MS` | `120000` | Two-minute grace without audio consumers while generating; status requests/SSE do not extend it. |
 | `STREAM_MAX_SESSIONS` | `4` | Retained session limit; inactive terminal sessions may be evicted for admission. |
+| `STREAM_MAX_CONSUMERS` | `4` | Concurrent audio connections per recording; further requests get 429/Retry-After. |
 | `STREAM_SPOOL_DIR` | Instance-specific temporary directory | Dedicated writable spool, exclusive to this server; set an owned bounded tmpfs in read-only containers. |
 
 ### External provider contract
