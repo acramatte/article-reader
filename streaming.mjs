@@ -447,7 +447,8 @@ export class StreamingNarrations {
       while (!session.bytes && !terminal(session.state)) await delay(100, undefined, { signal });
       const base = startSeconds > 0 && session.bytes ? await this.frameStart(session, startSeconds, signal) : 0;
       if (["stopped", "error"].includes(session.state)) {
-        response.writeHead(session.state === "error" ? 502 : 410, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        response.writeHead(session.state === "error" ? 502 : 410, { "Content-Type": "application/json",
+          "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
         return response.end(JSON.stringify({ error: session.error || "Narration stopped." }));
       }
       let offset = base;

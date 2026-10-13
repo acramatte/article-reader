@@ -367,7 +367,7 @@ function requestAs(server, host, path, { method = "GET", body, headers = {} } = 
     const request = http.request({ host: "127.0.0.1", port: server.address().port, path, method,
       headers: { Host: host, ...(body ? { "Content-Type": "application/json" } : {}), ...headers } }, response => {
       let text = "";
-      response.on("data", piece => { text += piece; }).on("end", () => resolve({ status: response.statusCode, text }));
+      response.on("data", piece => { text += piece; }).on("end", () => resolve({ status: response.statusCode, text, headers: new Headers(response.headers) }));
     });
     request.on("error", reject);
     request.end(body && JSON.stringify(body));
@@ -455,4 +455,49 @@ test("static responses carry a strict Content-Security-Policy", async (t) => {
     // Exact match, not substring: a loosened policy (extra sources or directives) must fail.
     assert.equal(policy, expected, `${path} must send the strict policy`);
   }
+});
+
+test("JSON, redirect and WAV-proxy responses carry X-Content-Type-Options: nosniff", async t => {
+  const staticDir = await mkdtemp(join(tmpdir(), "reader-nosniff-"));
+  await writeFile(join(staticDir, "index.html"), "<!doctype html><title>Reader</title>");
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let failing = true;
+  const { base, server, post } = await streamingReader(t, { staticDir, rootRedirect: "/streaming.html",
+    fetchPage: async () => { await gate; return { html, url: "https://example.com/story" }; },
+    synthesize: async () => (failing ? new Response("{}", { status: 500 })
+      : new Response(syntheticWav(), { headers: { "Content-Type": "audio/wav" } })) });
+  const nosniff = (response, label) => assert.equal(response.headers.get("x-content-type-options"), "nosniff", label);
+
+  nosniff(await fetch(base + "/", { redirect: "manual" }), "302 root redirect");
+  nosniff(await fetch(base + "/api/health"), "200 JSON");
+  nosniff(await post("/api/article", {}), "400 validation JSON");
+  nosniff(await fetch(base + "/api/nope"), "404 API route");
+  nosniff(await requestAs(server, "evil.example", "/api/health"), "403 host allowlist");
+  nosniff(await fetch(base + "/api/article", { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" }), "415");
+  nosniff(await fetch(base + "/api/article", { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://evil.example" }, body: "{}" }), "403 cross-origin");
+  nosniff(await fetch(base + "/streaming.html", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }), "405");
+
+  const started = post("/api/article", { url: "https://example.com/story" });
+  await delay(50);
+  const busy = await post("/api/article", { url: "https://example.com/other" });
+  release();
+  nosniff(busy, "429 article JSON"); assert.equal(busy.status, 429); assert.equal(busy.headers.get("Retry-After"), "2");
+  nosniff(await started, "200 article JSON");
+
+  const relayed = await post("/api/tts", { text: "Hello", voice: "jane", speed: 1 });
+  nosniff(relayed, "relayed upstream JSON error"); assert.equal(relayed.status, 502);
+  failing = false;
+  const wav = await post("/api/tts", { text: "Hello", voice: "jane", speed: 1 });
+  nosniff(wav, "WAV proxy"); assert.equal(wav.status, 200); assert.equal(wav.headers.get("content-type"), "audio/wav");
+
+  const { id, audioUrl } = await (await post("/api/streaming", { text: "An article paragraph.", voice: "jane", speed: 1 })).json();
+  await server.narrations.sessions.get(id).done;
+  nosniff(await fetch(base + audioUrl), "streamed MP3");
+  nosniff(await fetch(base + `/api/streaming/${id}/events`), "SSE");
+  await post(`/api/streaming/${id}/stop`, {});
+  const gone = await fetch(base + audioUrl);
+  nosniff(gone, "audio-route JSON error"); assert.equal(gone.status, 410);
+  assert.deepEqual(await gone.json(), { error: "Narration stopped." });
 });
