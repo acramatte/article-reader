@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, open, readdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
-import { planNarration } from "./chunks.mjs";
+import { runIsolated } from "./isolate.mjs";
 
 const terminal = state => ["ready", "error", "stopped"].includes(state);
 // Each sentence also carries a pause, so a short one takes longer than its length alone suggests.
@@ -58,7 +58,7 @@ export function mp3Frame(header) {
 
 export class StreamingNarrations {
   constructor({ spoolDir = process.env.STREAM_SPOOL_DIR, synthesizeChunk, ffmpegPath = "ffmpeg", maxAudioBytes = 64_000_000,
-    generationMs = 1_200_000, retentionMs = 21_600_000, disconnectMs = 120_000, maxSessions = 4 }) {
+    generationMs = 1_200_000, retentionMs = 21_600_000, disconnectMs = 120_000, maxSessions = 4, maxTextChars = 100_000 }) {
     for (const [key, value] of Object.entries({ maxAudioBytes, generationMs, retentionMs, disconnectMs, maxSessions })) {
       if (!Number.isSafeInteger(value) || value < 1 || value > (key === "maxSessions" ? 100 : key === "maxAudioBytes" ? 1_000_000_000 : 604_800_000)) {
         throw new Error(`${key} must be a positive bounded integer.`);
@@ -68,6 +68,8 @@ export class StreamingNarrations {
     this.spoolRoot = join(tmpdir(), "reader-streaming");
     spoolDir = resolve(spoolDir || join(this.spoolRoot, `instance-${process.pid}-${randomUUID()}`));
     Object.assign(this, { spoolDir, synthesizeChunk, ffmpegPath, maxAudioBytes, generationMs, retentionMs, disconnectMs, maxSessions });
+    // Dense rewrites (e.g. phone numbers) need up to ~250 bytes of planning heap per character.
+    this.planHeapMb = Math.max(128, Math.ceil(maxTextChars / 3500));
     this.sessions = new Map();
     this.creating = false;
     this.spoolReady = null;
@@ -120,7 +122,9 @@ export class StreamingNarrations {
   }
 
   async createSession({ text, voice, speed, language = "en", title = "", byline = "", sourceUrl = "", paceSeconds = 0 }) {
-    const plan = planNarration(text, { language });
+    // Untrusted text meets many speech rewrites: plan it in a bounded worker, off the event loop.
+    const plan = await runIsolated(new URL("./chunks.mjs", import.meta.url), "planNarration", [text, { language }],
+      { timeoutMs: 20_000, maxHeapMb: this.planHeapMb, failure: "This text is too large or complex to narrate." });
     const chunks = plan.chunks.map(chunk => chunk.text);
     if (!chunks.length) {
       // Reference URLs are not narrated, so text can have letters and still nothing to say.

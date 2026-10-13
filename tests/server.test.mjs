@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import http from "node:http";
 import { createApp } from "../server.mjs";
 import { html } from "./fixture.mjs";
 import { setTimeout as delay } from "node:timers/promises";
@@ -321,4 +322,74 @@ test("upstream errors and non-WAV responses become actionable API errors", async
       assert.ok((await result.json()).error.startsWith(name));
     }
   }
+});
+
+// Node's fetch always sends the connection's Host, so these requests set it explicitly.
+function requestAs(server, host, path, { method = "GET", body, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.request({ host: "127.0.0.1", port: server.address().port, path, method,
+      headers: { Host: host, ...(body ? { "Content-Type": "application/json" } : {}), ...headers } }, response => {
+      let text = "";
+      response.on("data", piece => { text += piece; }).on("end", () => resolve({ status: response.statusCode, text }));
+    });
+    request.on("error", reject);
+    request.end(body && JSON.stringify(body));
+  });
+}
+
+test("DNS-rebinding host names are rejected; IP literals, localhost and ALLOWED_HOSTS names are served", async t => {
+  const server = createApp({ allowedHosts: ["reader.vpn"], staticDir: "public",
+    fetchPage: async () => ({ html, url: "https://example.com/story" }) }).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.shutdown());
+  // After rebinding, the page's own name is both its Origin and the Host: the Origin check alone passed.
+  const rebound = { headers: { Origin: "http://rebind.attacker.example:8084" } };
+  for (const [path, options] of [["/api/config", rebound], ["/streaming.html", rebound],
+    ["/api/article", { ...rebound, method: "POST", body: { url: "https://example.com/story" } }]]) {
+    const response = await requestAs(server, "rebind.attacker.example:8084", path, options);
+    assert.equal(response.status, 403, path);
+    assert.match(response.text, /ALLOWED_HOSTS/);
+  }
+  for (const host of ["127.0.0.1:3001", "10.0.0.1:8084", "[::1]:3001", "localhost:5173", "reader.vpn"]) {
+    assert.equal((await requestAs(server, host, "/api/config")).status, 200, host);
+  }
+  for (const host of ["evil.example@127.0.0.1", "1.2.3.4.nip.io", "reader.vpn.attacker.example"]) {
+    assert.equal((await requestAs(server, host, "/api/config")).status, 403, host);
+  }
+  let status; // Node's client always fills in Host, so call the handler directly for a request without one.
+  await server.listeners("request")[0]({ url: "/api/config", method: "GET", headers: {} },
+    { setHeader() {}, writeHead(code) { status = code; }, end() {} });
+  assert.equal(status, 403);
+  const article = await requestAs(server, "reader.vpn", "/api/article", { method: "POST", body: { url: "https://example.com/story" },
+    headers: { Origin: "http://reader.vpn" } });
+  assert.equal(JSON.parse(article.text).title, "A garden for everyone");
+});
+
+test("one article is extracted at a time; others are told to retry", async t => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const post = await app(t, { fetchPage: async () => { await gate; return { html, url: "https://example.com/story" }; } });
+  const first = post("/api/article", { url: "https://example.com/story" });
+  await delay(50);
+  const busy = await post("/api/article", { url: "https://example.com/other" });
+  assert.equal(busy.status, 429);
+  assert.equal(busy.headers.get("Retry-After"), "2");
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal((await post("/api/article", { url: "https://example.com/story" })).status, 200);
+});
+
+test("hostile narration text is planned off the event loop and rejected promptly", async t => {
+  const { post } = await streamingReader(t);
+  let last = performance.now();
+  let stall = 0;
+  const timer = setInterval(() => { const now = performance.now(); stall = Math.max(stall, now - last); last = now; }, 10);
+  // Reported: this 100 KB paste blocked every request for 66 s, and repeatably (no session is created).
+  const started = performance.now();
+  const response = await post("/api/streaming", { text: `https://example.com/${")".repeat(99_980)}`, voice: "jane", speed: 1 });
+  clearInterval(timer);
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /only contains links/);
+  assert.ok(performance.now() - started < 5000);
+  assert.ok(stall < 250, `event loop stalled ${stall} ms`);
 });
