@@ -4,6 +4,7 @@ import https from "node:https";
 import ipaddr from "ipaddr.js";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
+import { runIsolated } from "./isolate.mjs";
 
 export function validateUrl(value) {
   let url;
@@ -92,9 +93,32 @@ export async function fetchArticleHtml(value, { signal, resolve = lookup, reques
   throw new Error("The webpage redirected too many times.");
 }
 
+// Readability's cost grows about cubically with element nesting (2,000 levels took 30 s); articles nest far less.
+const maxNesting = 400;
+function nestedBeyond(root, limit) {
+  const stack = [[root, 0]];
+  while (stack.length) {
+    const [node, depth] = stack.pop();
+    if (depth > limit) return true;
+    for (const child of node.children) stack.push([child, depth + 1]);
+  }
+  return false;
+}
+
+// Hostile HTML can take minutes or gigabytes to parse, so extraction runs in a bounded worker, which
+// loads JSDOM while the page downloads.
+export async function readArticle(value, { fetchPage = fetchArticleHtml, signal, timeoutMs = 10_000, maxHeapMb = 256 } = {}) {
+  validateUrl(value);
+  return runIsolated(import.meta.url, "extractArticle", fetchPage(value, { signal }).then(page => [page.html, page.url]),
+    { timeoutMs, maxHeapMb, signal, failure: "This webpage is too large or complex to read. Try pasting its text instead." });
+}
+
 export function extractArticle(html, url) {
   const dom = new JSDOM(html, { url }); // Scripts and remote resources are deliberately disabled.
   try {
+    if (nestedBeyond(dom.window.document.documentElement, maxNesting)) {
+      throw new Error("This webpage is too deeply nested to read. Try pasting its text instead.");
+    }
     const article = new Readability(dom.window.document, { maxElemsToParse: 50_000 }).parse();
     if (!article) throw new Error("No readable article found. Try another URL or paste the text.");
     const content = new JSDOM(article.content);

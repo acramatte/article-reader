@@ -1,8 +1,9 @@
 import http from "node:http";
+import { isIP } from "node:net";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchArticleHtml, extractArticle } from "./article.mjs";
+import { fetchArticleHtml, readArticle } from "./article.mjs";
 import { speechProvider } from "./tts-provider.mjs";
 import { createStreamingApi } from "./streaming-api.mjs";
 
@@ -19,6 +20,15 @@ export async function readJson(request, { maxBytes = 150_000 } = {}) {
   catch { throw new Error("Request body must be valid JSON."); }
 }
 
+// DNS rebinding: a hostile page can resolve its own name to this server; the browser then sends that name
+// as Host and Origin, which match each other. Rebinding needs a DNS name, so IP literals and localhost are
+// always this server; other names must be listed in ALLOWED_HOSTS (comma-separated).
+export function allowedHost(host, names) {
+  if (!/^(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::\d{1,5})?$/i.test(host || "")) return false;
+  const hostname = new URL(`http://${host}`).hostname;
+  return isIP(hostname.replace(/^\[|\]$/g, "")) !== 0 || hostname === "localhost" || names.includes(hostname);
+}
+
 export function createApp({
   ttsEngine = process.env.TTS_ENGINE || "pocket",
   ttsUrl = process.env.TTS_URL || "http://127.0.0.1:8000/tts",
@@ -29,6 +39,8 @@ export function createApp({
   synthesizeChunk,
   rootRedirect,
   experiment = false,
+  allowedHosts = (process.env.ALLOWED_HOSTS || "").split(",").map(name => name.trim().toLowerCase()).filter(Boolean),
+  extraction = {},
   ...streamingOptions
 } = {}) {
   const provider = speechProvider({ ttsEngine, ttsUrl, ttsToken, synthesize });
@@ -36,6 +48,8 @@ export function createApp({
   const voices = new Map(provider.config.voices.map(voice => [voice.id, voice.language]));
   const streaming = createStreamingApi({ ...streamingOptions, voices,
     synthesizeChunk: synthesizeChunk || provider.synthesizeChunk }, readJson);
+  // One extraction worker at a time: each may use a few hundred MB while parsing a page.
+  let extracting = false;
   const server = http.createServer(async (request, response) => {
     const controller = new AbortController();
     request.on?.("aborted", () => controller.abort());
@@ -45,6 +59,9 @@ export function createApp({
       response.end(JSON.stringify(body));
     };
     try {
+      if (!allowedHost(request.headers.host, allowedHosts)) {
+        return json(403, { error: "This host name is not allowed. Add it to ALLOWED_HOSTS to serve it." });
+      }
       const url = new URL(request.url, "http://localhost");
       if (experiment) response.setHeader("X-Reader-Experiment", "continuous-mp3-v1");
       if (request.method === "GET" && url.pathname === "/" && rootRedirect) {
@@ -65,8 +82,10 @@ export function createApp({
       if (request.method === "POST" && url.pathname === "/api/article") {
         const body = await readJson(request);
         if (typeof body?.url !== "string") return json(400, { error: "A webpage URL is required." });
-        const page = await fetchPage(body.url, { signal: controller.signal });
-        return json(200, extractArticle(page.html, page.url));
+        if (extracting) return json(429, { error: "Another article is being read. Please try again shortly." }, { "Retry-After": "2" });
+        extracting = true;
+        try { return json(200, await readArticle(body.url, { fetchPage, signal: controller.signal, ...extraction })); }
+        finally { extracting = false; }
       }
       if (request.method === "POST" && url.pathname === "/api/tts") {
         const body = await readJson(request);

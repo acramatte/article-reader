@@ -95,16 +95,19 @@ function speakHost(url, language) {
 }
 
 // URLs end before trailing sentence punctuation and closing brackets they did not open.
+// Bracket counts are kept up to date as the end moves: recounting per character was quadratic.
 function urlEnd(text, start, end) {
+  const counts = {};
+  for (let i = start; i < end; i++) counts[text[i]] = (counts[text[i]] ?? 0) + 1;
   while (end > start) {
     const last = text[end - 1];
     if (/[.,;:!?'"»”’]/.test(last)) end--;
     else if (/[)\]}]/.test(last)) {
       const open = { ")": "(", "]": "[", "}": "{" }[last];
-      const url = text.slice(start, end);
-      if (url.split(open).length >= url.split(last).length) break;
+      if ((counts[open] ?? 0) >= counts[last]) break;
       end--;
     } else break;
+    counts[last]--;
   }
   return end;
 }

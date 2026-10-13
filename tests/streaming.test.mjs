@@ -308,7 +308,7 @@ test("malformed request targets stay inside the HTTP error boundary", async (t) 
   const { server } = await app(t);
   let code;
   const response = { setHeader() {}, writeHead(status) { code = status; }, end() {} };
-  await assert.doesNotReject(server.listeners("request")[0]({ url: "//[", method: "GET", headers: {} }, response));
+  await assert.doesNotReject(server.listeners("request")[0]({ url: "//[", method: "GET", headers: { host: "127.0.0.1" } }, response));
   assert.equal(code, 400);
 });
 
