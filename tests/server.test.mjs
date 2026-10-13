@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import http from "node:http";
 import { createApp } from "../server.mjs";
+import { userError } from "../errors.mjs";
 import { html } from "./fixture.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -301,6 +302,37 @@ test("unexpected errors return generic messages, while extraction errors stay us
   const expired = await timeout("/api/article", { url: "https://example.com/story" });
   assert.equal(expired.status, 400);
   assert.equal((await expired.json()).error, "The request timed out.");
+});
+
+test("only a missing static file gets the build hint; other ENOENTs stay internal errors", async t => {
+  const lines = [];
+  const consoleError = console.error;
+  t.after(() => { console.error = consoleError; });
+  console.error = (...parts) => lines.push(parts.join(" "));
+  const staticDir = await mkdtemp(join(tmpdir(), "reader-static-"));
+  await writeFile(join(staticDir, "index.html"), "<!doctype html><title>Reader</title>");
+  t.after(() => rm(staticDir, { recursive: true, force: true }));
+  const { base } = await streamingReader(t, { staticDir });
+  assert.equal((await fetch(base + "/")).status, 200);
+  const missing = await fetch(base + "/missing.html");
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).error, "Not found. Run npm run build for the production UI.");
+  // A filesystem failure outside the static branch (an injected dependency reporting a vanished
+  // recording file) is internal: generic message, no build hint, details logged server-side.
+  const internal = await app(t, { synthesize: async () => {
+    throw Object.assign(new Error("Spool recording vanished."), { code: "ENOENT" });
+  } });
+  const response = await internal("/api/tts", { text: "Hello", voice: "jane", speed: 1 });
+  assert.equal(response.status, 502);
+  assert.equal((await response.json()).error, "The request could not be completed.");
+  assert.match(lines.at(-1), /^POST \/api\/tts Error Spool recording vanished\.$/, "details are logged server-side");
+  // A marked user error that happens to carry code ENOENT keeps its own status and message.
+  const marked = await app(t, { synthesize: async () => {
+    throw Object.assign(userError("Recording file vanished.", 410), { code: "ENOENT" });
+  } });
+  const kept = await marked("/api/tts", { text: "Hello", voice: "jane", speed: 1 });
+  assert.equal(kept.status, 410);
+  assert.equal((await kept.json()).error, "Recording file vanished.");
 });
 
 test("upstream 503 exposes only a retryable code and Retry-After, not provider details", async (t) => {

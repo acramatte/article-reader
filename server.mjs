@@ -126,16 +126,20 @@ export function createApp({
       const root = resolve(staticDir);
       const path = resolve(root, `.${decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname)}`);
       if (!path.startsWith(root + sep)) return json(403, { error: "Forbidden." });
-      const content = await readFile(path);
+      // Only a missing static file gets the build hint; any other ENOENT stays an internal error
+      // (generic client message, details logged in the catch below).
+      let content;
+      try { content = await readFile(path); }
+      catch (error) { if (error.code !== "ENOENT") throw error; throw userError("Not found. Run npm run build for the production UI.", 404); }
       const type = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" }[extname(path)] || "application/octet-stream";
       response.writeHead(200, { "Content-Type": type, "X-Content-Type-Options": "nosniff", "Content-Security-Policy": contentSecurityPolicy });
       response.end(content);
     } catch (error) {
       if (response.headersSent) return response.destroy();
       if (controller.signal.aborted) return;
-      if (error.code === "ENOENT") return json(404, { error: "Not found. Run npm run build for the production UI." });
       // Marked errors are intentionally user-facing; anything else is internal and reaches the
-      // client only as a generic message, with its details logged here.
+      // client only as a generic message, with its details logged here. The static branch marks
+      // its own missing files, so no ENOENT check belongs here.
       if (Number.isSafeInteger(error.status)) return json(error.status, { error: error.message },
         error.status === 429 ? { "Retry-After": "2" } : {});
       if (error.name !== "TimeoutError") console.error(request.method, request.url, error.name, error.message);
