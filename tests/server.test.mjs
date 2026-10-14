@@ -480,6 +480,7 @@ test("static responses carry a strict Content-Security-Policy", async (t) => {
     "default-src 'none'", "script-src 'self'", "style-src 'self'",
     "img-src 'self'", "media-src 'self'", "connect-src 'self'", "form-action 'none'",
     "base-uri 'none'", "frame-ancestors 'none'", "object-src 'none'",
+    "require-trusted-types-for 'script'", "trusted-types 'none'",
   ];
   const expected = directives.join("; ");
   for (const path of ["/", "/index.html", "/streaming.html", "/favicon.svg", "/assets/main.js", "/streaming.js"]) {
