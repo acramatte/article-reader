@@ -6,11 +6,11 @@ The successful experiment is now the default reader: `npm start` runs native con
 
 The experiment uses real Kokoro WAV responses, validates mono 24-kHz PCM16, strips WAV containers, and feeds one continuous FFmpeg MP3 encoder. Low input probing and output flushing are explicit: encoder defaults can otherwise delay output until more PCM arrives. Browser playback is a normal `<audio>` URL, with Media Session metadata and play/pause handlers. JavaScript polling only displays status; it does not produce or schedule audio.
 
-The results and polling references below describe the original Kokoro experiment. The current reader and diagnostic page use Pocket TTS and SSE status snapshots instead of recurring polling; native MP3 playback and the audio-consumer grace remain independent of status connections. See the [current architecture and SSE contract](../README.md#architecture) for implementation details. The historical phone results do not qualify the new provider or status transport on Android.
+The results and polling references below describe the original Kokoro experiment. The current reader and diagnostic page use Pocket TTS by default (Kokoro is opt-in) and SSE status snapshots instead of recurring polling; native MP3 playback and the audio-consumer grace remain independent of status connections. See the [runtime flows](architecture.md#6-runtime-view) and [current SSE contract](architecture.md#sse-and-timing-contract) for implementation details. The historical phone results do not qualify the new provider or status transport on Android.
 
 ## Run on a trusted private network
 
-Requirements: Node/npm dependencies, FFmpeg with `libmp3lame`, and a reachable Kokoro `/tts` endpoint.
+Requirements: Node/npm dependencies, FFmpeg with `libmp3lame`, and a reachable speech `/tts` endpoint matching `TTS_ENGINE` (Pocket TTS by default; set `TTS_ENGINE=kokoro` to repeat the original provider setup).
 
 1. `npm ci --include=dev`
 2. `npm run build`
@@ -51,7 +51,7 @@ The first physical Android/Brave run confirmed screen-off playback: 24 chunks we
 
 - At most one narration generates at a time, with no waiting queue. Concurrent creates receive 429/Retry-After.
 - At most four session records are retained; inactive terminal sessions can be evicted for a new session.
-- Defaults accept 100,000 text characters and 64,000,000 encoded bytes per session. Validated positive `STREAM_*` overrides and their defaults are listed in the README; `/api/config` exposes only non-secret limits. Extraction separately retains its 100,000-character limit.
+- Defaults accept 100,000 text characters and 64,000,000 encoded bytes per session. Validated positive `STREAM_*` overrides and their defaults are listed in the [backend configuration](development.md#backend-configuration); `/api/config` exposes only non-secret limits. Extraction separately retains its 100,000-character limit.
 - Generation has a twenty-minute deadline. Completed recordings and terminal error metadata have a separate six-hour retention timer, starting when generation ends; a paused completed recording is not canceled by the generation/disconnect deadline. Losing all audio consumers gives unfinished generation a two-minute grace period. Status polling does not extend it.
 - Pause pauses playback only. Generation can continue within these bounds.
 - Stop cancels future requests, kills the encoder, removes the spool and allows another session. Native Kokoro compute already accepted upstream may still finish.
@@ -70,11 +70,11 @@ These local Compose changes are not a deployment; existing VPS services are not 
 
 - `npm test`: includes bookmark validation, throttling and unavailable storage, plus deliberately synthetic WAV tones through the real encoder for WAV validation, early bytes, disconnected playback, cancellation, disk/lifetime limits, admission races, errors, and range replay.
 - `npm run build`
-- `TTS_URL=http://127.0.0.1:8027/tts npx playwright test --config playwright.streaming.config.mjs`: needs real ready inference and FFmpeg/Chromium; exercises production-built `/streaming.html`, early playback, playback beyond the pre-freeze audio while page JavaScript is frozen, server generation, pause/resume, Stop during delayed admission acknowledgement, and decoded non-silent speech. Port 3028 is isolated from the live phone preview. Run `npm run build` first after changing public assets.
-- `TTS_URL=http://127.0.0.1:8027/tts npx playwright test`: default-reader native playback/reload tests and migrated UI regressions; the diagnostic suite is explicitly separate.
+- `TTS_ENGINE=kokoro TTS_URL=http://127.0.0.1:8027/tts npx playwright test --config playwright.streaming.config.mjs`: repeats the original Kokoro setup and needs real ready inference and FFmpeg/Chromium; exercises production-built `/streaming.html`, early playback, playback beyond the pre-freeze audio while page JavaScript is frozen, server generation, pause/resume, Stop during delayed admission acknowledgement, and decoded non-silent speech. Port 3028 is isolated from the live phone preview. Run `npm run build` first after changing public assets. For Pocket TTS, leave `TTS_ENGINE` unset and point `TTS_URL` at that service.
+- `TTS_ENGINE=kokoro TTS_URL=http://127.0.0.1:8027/tts npx playwright test`: default-reader native playback/reload tests and migrated UI regressions against the retained Kokoro provider; the diagnostic suite is explicitly separate.
 - `docker build -t article-reader:streaming-spike .`
 - `node scripts/smoke-container.mjs article-reader:streaming-spike`: normal entry point and packaging.
-- `node scripts/smoke-streaming.mjs article-reader:streaming-spike http://KOKORO_CONTAINER:8000/tts DOCKER_NETWORK`: default runtime entry point, real inference, incremental MP3 decoding and cleanup under 512 MiB / one CPU / 128 PIDs with a separate spool tmpfs. Requires a Docker network where the named inference container is reachable; the script does not provision or expose inference.
+- `node scripts/smoke-streaming.mjs article-reader:streaming-spike http://POCKET_CONTAINER:8000/tts DOCKER_NETWORK`: current default runtime entry point and Pocket TTS provider, real inference, incremental MP3 decoding and cleanup under 512 MiB / one CPU / 128 PIDs with a separate spool tmpfs. Requires a Docker network where the named inference container is reachable; the script does not provision or expose inference. Unlike the historical Kokoro run, the current smoke hardcodes Jane and does not forward a host `TTS_ENGINE` setting into the container.
 
 The real speech acceptance writes its MP3 and screenshots under `.ui-review/streaming-playwright/`. Recovery tests exercise real MP3 seeking across reload and new-tab reopening, expiry, temporary network failure, interrupted restoration and resuming while generation continues. Automated recovery evidence is kept separate from the physical-device results below.
 

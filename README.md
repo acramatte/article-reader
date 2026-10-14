@@ -1,25 +1,30 @@
-<h1 align="center">
-Article Reader
-</h1>
+# Article Reader
 
-
-Turn an online article into something you can listen to. Paste a link, choose a voice and speed, and start playback. The reader pulls out the article text and reads it aloud, with pause, resume and stop controls. You can also paste text directly.
+Turn an online article into something you can listen to. Paste a link, choose a voice and speed, and listen while walking, cooking, or doing something other than looking at a screen. You can also paste text directly.
 
 <p align="center">
-  <img src="docs/demo/article-reader-mobile.gif" width="390" alt="Article Reader phone-sized demo: paste a URL, start narration, pause and resume, scroll the extracted article, and stop playback." />
+  <img src="docs/demo/article-reader-mobile.gif" width="390" alt="Article Reader mobile demo: paste a URL, start narration, pause and resume, scroll the extracted article, and stop playback." />
 </p>
 
-## Why it exists
+*UI demo recorded with the optional Kokoro backend; the default voices are listed below.*
 
-The goal is hands-free listening to online articles. Being able to consume them while walking, cooking, at the gym, touching grass, or doing something other than looking at a screen. Existing operating system and phone read-aloud tools still make the journey from a web page to a comfortable and continuous listening more cumbersome than it should be. This project explores a simpler, dedicated reader built around that flow.
+## Current features
 
-It's still an early version, not a finished podcast player. Narration now uses native continuous media, with lock-screen play/pause integration where the browser supports it and recovery of an existing recording after reload. Android/Brave testing confirmed prototype screen-off playback and integrated-reader recovery after Wi-Fi reconnection and browser kill/reopen. Browser processes can be reclaimed, and the saved position may lag while JavaScript is frozen. Speech generation runs in a separate service that you can host locally or remotely.
+- **URL-first reading:** extract the article with Mozilla Readability, or paste text when extraction fails.
+- **Continuous audio:** start listening before the whole article is generated; pause, resume, stop, and read again without re-fetching the URL. Stop playback to edit the article text before re-reading.
+- **English and French voices:** Pocket TTS is the default, with Jane (American English female), Bill Boerst (American English male), and Estelle (French female). [Kokoro is optional](docs/development.md#optional-kokoro-backend).
+- **Adjustable speed:** 0.8–2× in the UI, without changing pitch. Choose a voice matching the text's language; narration does not translate it.
+- **Sentence highlighting:** follow the narrated sentence, with article-panel auto-scroll that pauses when you scroll manually. Timing is approximate; highlighting needs browser CSS Custom Highlight support.
+- **Reload recovery:** resume the same temporary recording near its last saved position, without generating it again. Browser media/lock-screen play and pause are available where supported.
+- **Separate speech service:** run inference locally on CPU or use a matching hosted endpoint. Provider credentials stay on the reader backend.
 
-## Run it yourself
+This is an early reader, not a finished podcast player. Prototype screen-off playback and integrated-reader recovery after Wi-Fi reconnection and browser kill/reopen were observed on Android/Brave; reliable background playback and integrated lock-screen controls are not fully qualified. See the [device evidence and limits](docs/streaming-spike.md).
 
-You'll need **Node 24**, **FFmpeg with libmp3lame**, and **Docker** for the local setup below. Run these commands from the project root. The first inference-image build downloads the public Pocket TTS models, voices and dependencies; the resulting speech service runs on CPU without runtime network access, model downloads or an HF token.
+## Quick start
 
-### 1. Start the speech service
+Requirements: **Node 24**, **FFmpeg with `libmp3lame`**, and **Docker**. Run from the project root.
+
+### 1. Start speech inference
 
 ```sh
 docker build -t article-reader-pocket-tts:local pocket-tts-service
@@ -27,165 +32,42 @@ docker run --rm --name article-reader-pocket-tts \
   -p 127.0.0.1:8000:8000 article-reader-pocket-tts:local
 ```
 
-Leave this terminal running. In another terminal, check readiness:
+The first build downloads public models and voices. The resulting service runs on CPU without runtime model downloads or an HF token. Leave it running; in another terminal, wait for both language models to load and readiness to succeed:
 
 ```sh
 curl --fail http://127.0.0.1:8000/health
 ```
 
-Loading both models (English and French) takes time; retry the check until it succeeds before starting playback. The corrected two-vCPU container smoke peaked at 1.64 GiB and generated about 1.47× real time; this is not a production sizing guarantee or a speed comparison with Kokoro. See [measurements and limitations](docs/hf-inference.md#local-verification), especially for 2× playback.
+Retry the readiness check while models load. Inference capacity determines whether playback can keep up, especially at 2×; [local measurements are not a production sizing guarantee](docs/hf-inference.md#local-verification).
 
 ### 2. Start the reader
 
 ```sh
-npm install --include=dev
+npm ci --include=dev
 npm run build
 npm start
 ```
 
-Open **http://127.0.0.1:3001**, paste a link and click **Read**. Narration starts automatically and the extracted article appears below. If extraction fails, choose **Paste text instead**.
+Open **http://127.0.0.1:3001**, paste a link, and click **Read**. If extraction fails, choose **Paste text instead**. The Listen card provides **Read again**, **Pause/Resume**, and **Stop**; voice/speed settings and diagnostics are collapsible. Recovery offers the saved recording paused: tap **Resume** to continue.
 
-The Listen card provides **Read again**, **Pause/Resume** and **Stop**. After stopping, use **Edit article text** to make changes; **Read again** generates fresh narration from that text without fetching the URL again. Voice/speed settings and playback diagnostics are collapsible. Reload recovery offers the same recording paused near its last saved position; tap Resume to continue without regenerating speech. Available voices: Jane (American English female), Bill Boerst (American English male) and Estelle (French female); no French male voice is offered. Choose a voice matching the text’s language; narration does not translate the article. Speech is always synthesized at the model's own pace; the selected speed (UI choices 0.8–2×; the streaming API accepts 0.5–2) is applied afterwards by the reader's MP3 encoder (FFmpeg `atempo`), which changes tempo but not the model's natural cadence. Voice and speed are fixed for each listening session. The Jane voice derives from VCTK speaker p339 (CC BY 4.0, attribution required); Bill Boerst and Estelle are CC0. See [HF inference](docs/hf-inference.md) for sources.
+For hot-reload development, [run Node and Vite separately](docs/development.md#development-servers).
 
-### Optional Kokoro backend
+## Limits and safe hosting
 
-Pocket TTS remains the default. Kokoro is retained as an opt-in CPU backend for comparison, with Heart (American female), Michael (American male) and Siwis (French female). Stop the local Pocket TTS container before starting Kokoro on the same port:
+- JS-heavy or paywalled pages may not extract; inline ads or consent text can remain. Only public HTTP/HTTPS article URLs are accepted.
+- Speech preparation is deliberately limited to English and French. There is no French male voice, translation, or guaranteed pronunciation of every number, identifier, or abbreviation.
+- Pause stops listening, not generation. Stop removes the recording and cancels future work, but cannot interrupt computation already running on the speech service.
+- Recordings are temporary and instance-local: server restarts discard them, and retention/capacity limits can expire them. Use one playback tab; cross-tab coordination, offline narration, and arbitrary seeking in growing streams are not provided. Saved positions may lag while mobile JavaScript is frozen.
+- Sustained inference sizing remains unverified. Pocket passed a bounded local run; retained Kokoro has observed CPU memory growth/OOM. See [experiments and benchmarks](docs/experiments.md).
 
-```sh
-docker build -t article-reader-kokoro:local kokoro-service
-docker run --rm --name article-reader-kokoro \
-  -p 127.0.0.1:8000:8000 article-reader-kokoro:local
-```
+**Do not expose the app publicly as-is.** It has no built-in user authentication or per-user rate limits. Keep the reader behind a VPN or another access-control layer, and local inference bound to loopback. The reader already answers only to IP literals, `localhost`, and names listed in `ALLOWED_HOSTS` (blocking DNS-rebinding pages), and serves a strict Content-Security-Policy, including in development. The supplied Compose setup is a WireGuard deployment template, not proof of a production rollout; see the [deployment runbook](docs/deployment.md).
 
-Wait for `/health` as above, then start the built reader with `TTS_ENGINE=kokoro npm start`. For development, use `TTS_ENGINE=kokoro npm run backend`; Vite needs no engine setting or rebuild. For a remote backend, also set `TTS_URL` and its matching `TTS_TOKEN`.
+## Documentation
 
-`TTS_ENGINE=pocket|kokoro` selects one engine at reader startup; it does not start an inference service, load both engines, or provide automatic failover. Both pages obtain the selected voice catalog from `/api/config`, and both speech APIs reject another engine's IDs. Switching engines requires restarting the reader with a matching endpoint, discards its temporary recordings, and requires reloading the page. WAV→continuous MP3, speed adjustment, SSE and native playback use the same path for either backend. Kokoro's previously observed memory growth and weaker French voice remain limitations, not fixed by this flag.
+Start with the [documentation map](docs/README.md). Technical detail lives outside this README:
 
-Each inference image is built and smoke-tested separately by CI. Verify Kokoro locally with `python3 scripts/smoke-kokoro.py article-reader-kokoro:local --quick` (short real WAVs for all three reader voices, CPU-only/offline execution and input rejection). Omit `--quick` for longer-input, speed and concurrency probes. Run `TTS_ENGINE=kokoro npx playwright test tests/browser/voices.spec.mjs` against the running Kokoro service for browser catalog and real playback checks.
-
-### Hosting
-
-**Do not expose the app publicly as-is.** The reader requires an external access-control layer; it does not enforce per-user rate limits. Streaming admission is bounded to one generating narration and four retained recordings by default, but that is not a public-service abuse boundary. Keep it behind a VPN or another access-control layer, and keep local inference bound to loopback.
-
-For containers, the root `Dockerfile` packages the reader UI and backend only; inference is a separate instance. The supplied `compose.yaml` targets a WireGuard deployment, binding to `10.0.0.1:8084` by default. See [deployment](docs/deployment.md) for image configuration, credentials, HTTPS, firewall and update instructions, or [HF inference](docs/hf-inference.md) to host the speech service on a Hugging Face Protected custom-container endpoint.
-
-## Development and configuration
-
-### Architecture
-
-```mermaid
-flowchart LR
-    Browser["Browser / phone<br/>Native audio player"] -->|"Article requests and playback controls"| Reader["Reader instance<br/>Node API + FFmpeg + built UI"]
-    Reader -->|"Article text + continuous MP3"| Browser
-    Reader -->|"Fetch article"| Website["Public article website"]
-    Reader -->|"Speech-text chunks + voice"| Speech["Speech instance<br/>Pocket TTS (default) or Kokoro: local or hosted"]
-    Speech -->|"WAV per chunk"| Reader
-    classDef managed fill:#1e40af,stroke:#1e3a8a,color:#ffffff
-    classDef external fill:#4b5563,stroke:#374151,color:#ffffff,stroke-dasharray:5 5
-    class Reader,Speech managed
-    class Browser,Website external
-```
-
-Grey, dashed components are external platforms outside our control; blue components are services we run.
-
-The Node backend extracts article text with Mozilla Readability and owns narration: small paragraph/sentence chunks feed a single FFmpeg encoder producing continuous MP3 audio, applying the selected speed with `atempo` and accounting audio duration at that tempo. The first chunk is capped at 220 characters, later chunks at 500. A native HTML audio element plays the growing stream before the full article is synthesized; server-sent events (SSE) display progress and handle recovery, not audio scheduling.
-
-`GET /api/streaming/:id/events` sends a named `status` event containing the current snapshot immediately on connect/reconnect, then pushes preparation progress, warmup and terminal states. First-audio, chunk progress, warmup, consumer/mark changes and terminal states publish immediately; byte-only encoder updates are coalesced into the latest counters at most once every 250 ms, rather than publishing every MP3 frame. Immediate updates include pending counters, and completed snapshots contain the final byte count. It sends comment heartbeats every 15 seconds, allows at most four status subscribers per recording, and closes on ready/error/Stop. A stalled subscriber is disconnected instead of buffering unlimited updates; EventSource reconnects with the latest snapshot, so no event replay is required. Status disconnections neither cancel narration nor count as audio consumers. There is no recurring `/status` polling; the JSON snapshot endpoint remains for explicit recovery, retry, media-error diagnosis and completion checks. Both the reader and diagnostic page use SSE. Proxies must allow unbuffered long-lived responses; see [deployment](docs/deployment.md#vpn-only-access-and-browser-https).
-
-The reader highlights the sentence being narrated. Chunks are packed from whole sentences (`Intl.Segmenter` in the voice's language), so the admission response and `/content` give each sentence's `[start, end]` offsets into the narrated text. As each chunk is encoded, a named `timing` event sends `{from, timings}` with `[start, end]` recording seconds for its sentences; a (re)connect first sends all timings so far, and `/content` includes them for recovery. A chunk's duration is exact; within a chunk, sentence times are estimated from each sentence's spoken length (after speech preparation, below) plus a fixed per-sentence pause allowance. The article panel shows exactly the narrated text, including pasted text, and auto-follow scrolls only inside it, pausing for five seconds after the reader scrolls it.
-
-Before chunking, a speech-only preparation step (`speech-text.mjs`) rewrites expressions speech models misread, in the voice's language only (English or French). Pocket TTS tokenizes digits one at a time and misreads most numbers of two or more digits (`42` → "four two", `128K` → "twelve eight K", `3.5` → "three five"; French digits are worse), so numbers are spoken as words (`number-words.mjs`): integers, decimals, `128K`/`16GB`-style suffixes, `$50`/`50 €` amounts, English ordinals (`22nd`) and English years in a year context (`in 1999` → "nineteen ninety-nine", `the 1990s`). Also: multiplier ranges (`2-3x` → "two to three times", "deux à trois fois"), units after a number (`3 cm`, `2.5 kg`, `120 km/h`, `20 min`, `180 °C`, `30 kWh`, `16 ms` → "three centimeters", "cent vingt kilomètres par heure"…), clock times (`9:05 PM` → "nine oh five p.m.", `10h30` → "dix heures trente"), ISO and day-first dates (`2026-09-30` → "September thirtieth, twenty twenty-six"), phone numbers (English digit by digit, French by pairs), a short list of abbreviations (`Dr.`, `Mr.`, `Prof.`, `No.`, `e.g.`, `i.e.`, `vs.`, `approx.`, `etc.`; `M.`, `Mme`, `p. ex.`, `c.-à-d.`, `n°`, `env.`), capital-letter codes (`H100` → "H one hundred", `Q3`), `TL;DR` (spoken as spaced letters: its semicolon garbled the surrounding phrase), abbreviated months in dates (`Sep 30` → "September thirty", `30 sept. 2026` → "trente septembre deux mille vingt-six") and French ordinals (`10e`/`10ème`/`10ᵉ` → "dixième", `1er` → "premier"). URLs are never narrated in full: Markdown links keep their label, an inline URL is spoken as its domain ("github dot com"), and a URL alone on its line or cited in brackets after a phrase is skipped; nothing is fetched. Identifiers and codes such as `d1-3B`, `Phi-3`, `COVID-19`, `0x1e`, `4x4`, `3.11.2`, `192.168.1.1` or `10:30:15` are left alone, as are English numeric dates whose day and month order is ambiguous (`09/10/2026`). The displayed text is unchanged: each spoken sentence maps back to its original range, so a rewritten expression is highlighted as written and skipped URLs do not shift later highlights. Text containing only links is rejected as having nothing to narrate.
-
-Browser API calls stay same-origin. Provider credentials remain on the reader backend, never in the browser. Article text, source metadata and recordings are retained temporarily on this reader instance for recovery; they do not survive a server restart. Browser storage contains only a validated session reference, title and best-known position, not article text or audio. With remote inference, text is sent to that service.
-
-Pause pauses listening, not generation. The server continues within its generation and storage limits. Stop cancels future requests, kills the encoder, removes the recording and clears its bookmark, but cannot interrupt speech computation already running on the inference service. Recovery restores an already-generated saved position in the growing recording and offers explicit Resume without waiting for the whole article. While generating, the server streams the recording from the MP3 frame at that position (`/audio?start=<seconds>`) instead of making the browser download the prefix; completed files support byte ranges.
-
-### Development servers
-
-With the speech service above running, start these in separate terminals:
-
-```sh
-npm run backend
-npm run dev
-```
-
-Open **http://localhost:5173**. Vite serves the UI and proxies `/api` to the Node backend at `127.0.0.1:3001`. To run without Docker, create a Python 3.12 environment in `pocket-tts-service/.venv`, install `requirements.txt`, stage the assets once with `.venv/bin/python prepare_assets.py <asset-dir>` (this step uses the network), then from `pocket-tts-service` run `POCKET_TTS_MODEL_DIR=<asset-dir> HF_HUB_OFFLINE=1 .venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1`. Keep the asset directory outside the repository.
-
-### Backend configuration
-
-Set these environment variables on the **Node backend**:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `TTS_ENGINE` | `pocket` | Startup engine selection: `pocket` or `kokoro`. Unset or empty uses `pocket`; unknown values fail startup. Must match `TTS_URL`. |
-| `TTS_URL` | `http://127.0.0.1:8000/tts` | Full speech-generation endpoint. |
-| `TTS_TOKEN` | Unset | Optional server-side Bearer token. Never use a `VITE_*` variable for it. |
-| `PORT` | `3001` | Reader backend port. |
-| `HOST` | `127.0.0.1` | Reader backend bind address. |
-| `ALLOWED_HOSTS` | Unset | Comma-separated host names the reader answers to, besides IP addresses and `localhost` (always allowed). Other `Host` headers get 403, which blocks DNS-rebinding pages. Set it when browsing the reader by name, e.g. `reader.example.internal`. |
-| `STREAM_MAX_TEXT_CHARS` | `100000` | Narration text limit; extraction separately caps article text at 100,000 characters. Text is planned in a worker whose heap scales with this limit (about 290 MB at 1,000,000). |
-| `STREAM_MAX_AUDIO_BYTES` | `64000000` | Encoded bytes per recording. |
-| `STREAM_GENERATION_MS` | `1200000` | Twenty-minute synthesis/encoding deadline. |
-| `STREAM_RETENTION_MS` | `21600000` | Six-hour retention after generation or a terminal error. |
-| `STREAM_DISCONNECT_MS` | `120000` | Two-minute grace without audio consumers while generating; status requests/SSE do not extend it. |
-| `STREAM_MAX_SESSIONS` | `4` | Retained session limit; inactive terminal sessions may be evicted for admission. |
-| `STREAM_MAX_CONSUMERS` | `4` | Concurrent audio connections per recording; further requests get 429/Retry-After. |
-| `STREAM_SPOOL_DIR` | Instance-specific temporary directory | Dedicated writable spool, exclusive to this server; set an owned bounded tmpfs in read-only containers. |
-
-An external speech endpoint must accept `{text, voice, speed: 1}` JSON with the selected engine's voices and return a complete mono 24-kHz PCM16 `audio/wav` response. Pocket uses `jane`, `bill_boerst` and `estelle`; Kokoro uses `af_heart`, `am_michael` and `ff_siwis`. Pair `TTS_ENGINE`, `TTS_URL` and endpoint credentials when deploying or rolling back (see [deployment](docs/deployment.md#readerinference-pairing)). `/api/config` exposes only public engine/voice metadata and streaming limits, never the endpoint or token. The raw `/api/tts` WAV route accepts only speed 1; adjusted speeds are available through streaming narration. HF's default Transformers runtime is not a drop-in replacement; use a matching custom inference image. If you change the backend `PORT` during development, set `READER_BACKEND_PORT` to the same value when starting Vite.
-
-### Tests
-
-```sh
-npm test
-npm run build
-```
-
-Unit/integration tests cover extraction and SSRF protections, chunking, speech preparation and its mapping to highlighted text, provider retries, native-player state and recovery, bounded streaming, concurrency, deadlines, retention, spool isolation, cancellation and shutdown. Encoder tests deliberately use synthetic WAV tones with real FFmpeg. For real browser playback tests, keep the local Pocket TTS service running, then run:
-
-```sh
-npx playwright install chromium
-npm run test:browser
-```
-
-The browser suite starts dedicated servers on UI port 5197 and backend port 3017; override them with `READER_UI_PORT` and `READER_BACKEND_PORT`. Occupied ports fail rather than reuse another server. Traces and screenshots go to `.ui-review/playwright/`.
-
-Tests require the local Pocket TTS service and internet access to `https://www.paulgraham.com/greatwork.html` for real article/audio checks. They cover native continuous MP3 playback, reload recovery without new synthesis, playback controls, completion, URL-first layout, extraction errors, manual fallback, editing/re-reading without re-extraction, keyboard access and responsive/reduced-motion behavior. Layout/startup/control fixtures are explicitly synthetic; real-provider tests separately exercise Pocket TTS and native MP3 playback. Headless checks don't establish narration quality or reliable background playback on physical phones.
-
-### Manual pronunciation regression check
-
-With the **real Pocket TTS service** running (setup above), use Node, FFmpeg and Python to compare speech with handwritten references. This slow, local tool is **not CI**. Install Whisper in the service venv, then run:
-
-```sh
-uv pip install --python pocket-tts-service/.venv/bin/python faster-whisper==1.2.1
-node scripts/pronunciation.mjs --baseline \
-  --python pocket-tts-service/.venv/bin/python --out /tmp/pronunciation-run
-```
-
-Whisper downloads `small` on first use (`--model <local-directory>` uses staged weights). Run one check at a time on small machines.
-Both decodes prepend 0.5 seconds of silence to each WAV's decoded audio to reduce clipped opening words; retained WAVs remain unchanged.
-
-`--cases tests/fixtures/pronunciation.json` selects a JSON array of `{id, language, text, reference}`: unique lowercase slug IDs, `en`/`fr`, and independent references written as **spoken words**, never derived from preparation. Prepared synthesis uses `planNarration`; `--baseline` also sends original text verbatim (maximum 1,000 characters). Scoring joins letter runs and expands known transcript abbreviations.
-
-Digit-suppressed ASR is the default gate, preventing number formatting from hiding misreadings. Optional per-case `"asr": "unsuppressed"` always adds ordinary ASR and scores it after verbalizing its digits with `numberWords` in that language. Use this for known decoder failures: suppression hallucinates French dates/years; only `fr-date` opts in among the seeds. `--asr-diagnostic` retains an ordinary decoding for other cases without changing their gate. Neither pass is prompted with the reference.
-
-Default `--samples 3` (minimum two) reports median/mean/min/max WER and gates on the median: with three samples, at least two must exceed the threshold to fail. Even sample counts use the average of the two middle scores. Exit **0**: all prepared medians ≤ `--threshold 0.2`; **1**: a prepared median exceeds it; **2**: tool/setup error. Raw baselines never gate. New output directories retain WAVs, exact texts, transcripts, settings and `report.json`; existing directories are refused. **WER is triage, not phonetic proof**: Pocket sampling and ASR spelling/hallucinations vary. Listen to retained failed/outlier clips before changing rules; unsuppressed ASR can conceal number errors.
-English brand names in French voices are out of scope.
-
-
-## Locked-screen playback and diagnostic page
-
-The default reader now uses the [continuous-media implementation](docs/streaming-spike.md). `npm run streaming` retains the diagnostic `/streaming.html` page with deliberate pacing, a lock-screen test mark and detailed reports, backed by the same API/provider. Screen-off playback was confirmed on Brave/Android in the prototype, with improved buffering when test pacing was disabled. Desktop tests recover an existing recording after reload and tab reopening without regeneration. Physical Android/Brave testing confirmed integrated-reader Resume after leaving/rejoining Wi-Fi and after killing/reopening the browser; integrated lock-screen controls have not been separately qualified.
-
-## Current limits
-
-- JS-heavy or paywalled pages may not extract; paste text as a fallback. Readability cannot remove every inline ad or consent banner.
-- Extraction accepts public HTTP/HTTPS URLs on standard ports, without URL credentials. Private, loopback, link-local and reserved addresses are blocked, including redirects; DNS results are checked and the selected public IP is pinned to the connection.
-- Fetches have a 15-second deadline, five-redirect limit and 3 MB HTML limit. Scripts are not executed, UTF-8 HTML is assumed, and article text is limited to 100,000 characters.
-- Sentence highlighting estimates times within each chunk (about 0.2 s average and 0.6 s worst-case boundary error in a Pocket TTS sample), and needs the CSS Custom Highlight API; other browsers play without a highlight.
-- Speech preparation is deliberately narrow (English and French only): it covers only the units and abbreviations listed above and no other date formats; product numbers are read as cardinals (`RTX 4090` → "four thousand ninety"), French numbers default to the masculine (`21 voitures` → "vingt et un") and a bare French `1` is left as written. Whether a bracketed URL is a skippable citation is a heuristic: it must follow at least two words of its clause. Without a year context ("from 2020 to 2024"), English years are read as cardinals.
-- Recovery seeks completed recordings and uses Media Session play/pause where supported, but arbitrary seeking in growing streams (a recovered growing stream cannot seek back before its restored position), offline narration and guaranteed unkillable mobile playback are not provided. Use one playback tab; cross-tab coordination is not implemented.
-- The inference server needs to be dimensioned according to usage. Concurrent listening is limited by the speech service’s compute capacity and request queue. Although the model is shared per inference worker, not loaded separately for each user.
-- Kokoro (opt-in): extended testing of the previous local Kokoro CPU inference showed memory growth and an OOM kill at a 6 GiB container limit; this was not an observed failure of the HF endpoint. Restarting restored service, not a fix; see the [inference follow-up](docs/streaming-spike.md#known-inference-follow-up-sustained-cpu-memory-growth). Pocket TTS passed a bounded 30-request mixed-language run without OOM, but longer production testing remains necessary; do not assume the original problem is permanently solved.
-
-The old browser-inference experiment in `main_.js` is not loaded by the app. Its unused `kokoro-js` dependency was removed; revisiting it requires installing that dependency separately.
+- [Plain-language visual guide](docs/how-it-works.html): a standalone HTML explainer of the article-to-audio journey, playback controls, and recovery. Download/open it locally or serve it with the docs; repository hosts may show its source rather than render it.
+- [Architecture](docs/architecture.md): context, components, runtime sequences, development/production infrastructure, decisions, and risks.
+- [Development and configuration](docs/development.md): alternative backends, environment variables, tests, and pronunciation checks.
+- [Deployment](docs/deployment.md) and [HF inference](docs/hf-inference.md): containers, access controls, credentials, rollout, and service packaging.
+- [Experiments and benchmarks](docs/experiments.md): what was tried, what was adopted, measured evidence, and its limitations.

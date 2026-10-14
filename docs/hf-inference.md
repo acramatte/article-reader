@@ -54,7 +54,7 @@ This is a short bounded run, not proof of no long-term memory growth, a producti
 - `ghcr.io/acramatte/article-reader-pocket-tts:stable`
 - `ghcr.io/acramatte/article-reader-pocket-tts:sha-<full-commit>`
 
-The workflow also builds/smoke-tests the retained Kokoro image independently and publishes `ghcr.io/acramatte/article-reader-kokoro` with the same tags from main. Keeping both images available does not load or start both engines; the reader selects one endpoint/catalog at startup. See the [optional Kokoro setup](../README.md#optional-kokoro-backend).
+The workflow also builds/smoke-tests the retained Kokoro image independently and publishes `ghcr.io/acramatte/article-reader-kokoro` with the same tags from main. Keeping both images available does not load or start both engines; the reader selects one endpoint/catalog at startup. See the [optional Kokoro setup](development.md#optional-kokoro-backend).
 
 These are planned references until the commits are pushed and CI publishes the image. It will be a new GHCR package: verify/set its visibility to Public after first publication if anonymous HF pulling is intended. Neither the reader package's nor the old `-kokoro` package's visibility proves that this package is public. Keep immutable release references for HF; moving `stable` in GHCR does not itself trigger an HF deployment update.
 

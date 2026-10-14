@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>How Article Reader works — a visual guide</title>
+  <style>
+    :root { color-scheme: light dark; --fg: CanvasText; --muted: color-mix(in srgb, CanvasText 65%, Canvas); --border: color-mix(in srgb, CanvasText 25%, Canvas); --surface: color-mix(in srgb, CanvasText 5%, Canvas); --accent: LinkText; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--fg); font: 17px/1.65 system-ui, sans-serif; }
+    main { max-width: 880px; margin: auto; padding: 32px 24px 56px; }
+    nav { font-size: 14px; display: flex; flex-wrap: wrap; gap: 20px; }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.15; margin: 32px 0 18px; }
+    h2 { font-size: 25px; line-height: 1.25; margin: 0 0 16px; }
+    h3 { font-size: 19px; margin: 0 0 8px; }
+    p { margin: 0 0 16px; }
+    section { margin-top: 40px; }
+    .lead { max-width: 65ch; color: var(--muted); }
+    .graphic { margin: 20px 0; }
+    svg { display: block; width: 100%; max-width: 480px; margin: auto; height: auto; overflow: visible; }
+    svg text { font-family: system-ui, sans-serif; fill: currentColor; }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .note { border-left: 3px solid var(--accent); padding-left: 16px; }
+    footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--muted); }
+    @media (max-width: 600px) { main { padding: 24px 16px 40px; } .cards { grid-template-columns: 1fr; } }
+    @media print { main { max-width: none; } a { color: inherit; } .card, .graphic { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+<main>
+  <nav aria-label="Documentation"><a href="../README.md">Project overview</a><a href="README.md">Documentation map</a><a href="architecture.md">Technical architecture</a></nav>
+  <header>
+    <h1>An article becomes something you can listen to.</h1>
+    <p class="lead">Think of Article Reader as a reading desk and a separate narrator. The desk finds the words, the narrator speaks them, and your browser plays the recording.</p>
+  </header>
+
+  <section aria-labelledby="journey">
+    <h2 id="journey">From link to listening</h2>
+    <div class="graphic">
+      <svg viewBox="0 0 480 720" role="img" aria-labelledby="journey-title journey-description">
+        <title id="journey-title">The path from a web article to your speakers</title>
+        <desc id="journey-description">You paste a link. The reader fetches the public page and extracts article text, or you paste text instead. A separate speech service turns small parts into speech. The reader joins them into one growing recording that your browser plays.</desc>
+        <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/></marker></defs>
+        <g fill="none" stroke="var(--border)" stroke-width="2">
+          <rect x="20" y="20" width="440" height="140" rx="16"/>
+          <rect x="20" y="200" width="440" height="140" rx="16"/>
+          <rect x="20" y="380" width="440" height="140" rx="16"/>
+          <rect x="20" y="560" width="440" height="140" rx="16"/>
+        </g>
+        <g fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#arrow)">
+          <path d="M 240 166 V 193"/>
+          <path d="M 240 346 V 373"/>
+          <path d="M 240 526 V 553"/>
+        </g>
+        <g font-size="18">
+          <text x="40" y="53" font-weight="700">1 · You choose the words</text>
+          <text x="40" y="87">Paste an article link.</text>
+          <text x="40" y="116">Or paste text directly.</text>
+          <text x="40" y="233" font-weight="700">2 · The reader prepares them</text>
+          <text x="40" y="267">Extract text from the page.</text>
+          <text x="40" y="296">Send small parts for speech.</text>
+          <text x="40" y="413" font-weight="700">3 · The narrator speaks</text>
+          <text x="40" y="447">A separate service makes audio.</text>
+          <text x="40" y="476">The reader joins the parts.</text>
+          <text x="40" y="593" font-weight="700">4 · Your browser plays it</text>
+          <text x="40" y="627">One recording keeps growing.</text>
+          <text x="40" y="656">Listen and follow the article.</text>
+        </g>
+      </svg>
+    </div>
+    <p>Choose an English or French voice that matches the text. Changing voices does not translate the article. When a page hides its content behind scripts or a paywall, pasting text is the fallback.</p>
+  </section>
+
+  <section aria-labelledby="early">
+    <h2 id="early">You do not have to wait for the whole article</h2>
+    <div class="graphic">
+      <svg viewBox="0 0 480 250" role="img" aria-labelledby="early-title early-description">
+        <title id="early-title">Listening overlaps with making the rest of the recording</title>
+        <desc id="early-description">Before playback, the service prepares the first part. Once that part is available, you can listen while the service continues preparing later parts. This is a conceptual illustration, not a timing measurement.</desc>
+        <g font-size="18"><text x="10" y="34">Before listening</text><text x="250" y="34">While you listen</text></g>
+        <path d="M 230 20 V 240" stroke="var(--border)" stroke-width="2" stroke-dasharray="5 5"/>
+        <g fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="10" y="60" width="200" height="76" rx="10"/>
+          <rect x="250" y="60" width="220" height="76" rx="10"/>
+          <rect x="250" y="159" width="220" height="76" rx="10"/>
+        </g>
+        <g font-size="18">
+          <text x="26" y="92">Make the first part</text>
+          <text x="266" y="92">Keep making</text><text x="266" y="117">later parts</text>
+          <text x="266" y="191">Play the audio</text><text x="266" y="216">already available</text>
+        </g>
+      </svg>
+    </div>
+    <p>If the narrator is slower than your listening speed, the player may need to buffer. Faster playback does not make the speech model work faster. These pictures show the idea, not measured performance.</p>
+  </section>
+
+  <section aria-labelledby="controls">
+    <h2 id="controls">Three controls, three different jobs</h2>
+    <div class="cards">
+      <article class="card"><h3>Pause / Resume</h3><p>Like putting a finger on your place in a book. Listening pauses; the narrator can keep preparing the recording.</p></article>
+      <article class="card"><h3>Stop</h3><p>Throw away this recording and cancel future parts. Speech already being made on the separate service may still finish.</p></article>
+      <article class="card"><h3>Read again</h3><p>Make a fresh recording from the article text already on the desk. After Stop, you can edit that text first; the link is not fetched again.</p></article>
+    </div>
+  </section>
+
+  <section aria-labelledby="bookmark">
+    <h2 id="bookmark">Reload recovery is a bookmark, not a downloaded book</h2>
+    <p>Your browser saves a reference to the recording and its best-known listening position. The article and audio stay temporarily on the reader server, not in that browser bookmark.</p>
+    <p>On reload, the reader checks whether the same recording still exists and offers it paused near that position. Tap Resume to continue without asking the narrator to start over. A sleeping phone may not save every moment, so the position can lag.</p>
+    <p class="note">The bookmark cannot bring back an expired or stopped recording, or one lost when the reader server restarts. This is not offline listening. Use one playback tab.</p>
+  </section>
+
+  <section aria-labelledby="privacy">
+    <h2 id="privacy">Where the words go</h2>
+    <p>The reader server fetches the article. The separate speech service receives the words it must speak. That service can run on your machine or on a hosted endpoint; provider credentials stay on the reader server.</p>
+    <p>Keep the reader behind a VPN or another access-control layer. It does not have built-in user authentication or per-user rate limits.</p>
+  </section>
+  <footer>Need the exact components, messages, and deployment boundaries? Read the <a href="architecture.md">architecture guide</a>. For setup and limits, start with the <a href="../README.md#quick-start">quick start</a>. This guide is standalone HTML: no scripts, remote fonts, or external image downloads.</footer>
+</main>
+</body>
+</html>
