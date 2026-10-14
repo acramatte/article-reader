@@ -227,7 +227,7 @@ The provider exposes bounded errors without leaking endpoint credentials/transpo
 | Host allowlist and strict CSP | A DNS rebind cannot match the allowlist, and pages admit only same-origin resources; both policies apply identically in development and production. |
 | Explicit user vs. internal errors | Only messages marked with an HTTP status reach clients; internal details stay in logs. |
 
-Historical alternatives, measurements and their caveats belong in [experiments](experiments.md), [streaming spike](streaming-spike.md) and [HF inference](hf-inference.md), not duplicated benchmark tables here. The old `main_.js` browser-inference experiment is not loaded; its removed `kokoro-js` dependency would need separate installation to revisit it.
+Historical alternatives, measurements and their caveats belong in [experiments](experiments.md), [streaming spike](streaming-spike.md) and [HF inference](hf-inference.md), not duplicated benchmark tables here. The old `main_.js` browser-inference experiment was deleted as dead code; its last version remains in git history and its removed `kokoro-js` dependency would need separate installation to revisit it.
 
 ## 10. Quality requirements
 

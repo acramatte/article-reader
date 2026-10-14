@@ -4,9 +4,9 @@ This ledger maps decisions to their evidence; the linked references retain the r
 
 ## Browser inference: historical, unused
 
-**Status / decision:** The browser-inference experiment in [`main_.js`](../main_.js) is not loaded by the app. Its unused `kokoro-js` dependency was removed; revisiting the experiment requires installing that dependency separately. Current inference runs behind the Node provider boundary, not in the browser.
+**Status / decision:** The browser-inference experiment (`main_.js`) was dead code and the only code using `innerHTML` and `URL.createObjectURL`, so it was deleted. Its unused `kokoro-js` dependency was removed earlier; revisiting the experiment requires installing that dependency separately. The last version remains in git history ([`main_.js` at `34fc9af`](https://github.com/acramatte/article-reader/blob/34fc9af9725802ab9c87e49b4cd845345d9a7c0b/main_.js)). Current inference runs behind the Node provider boundary, not in the browser.
 
-**Evidence boundary:** Keeping the historical file does not demonstrate a supported browser engine, current packaging compatibility or a performance comparison with the server engines.
+**Evidence boundary:** The historical file demonstrated neither a supported browser engine, current packaging compatibility, nor a performance comparison with the server engines; deleting it removes only an unused trap.
 
 ## Native continuous playback: promoted to default
 
