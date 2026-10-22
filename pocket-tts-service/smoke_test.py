@@ -1,6 +1,7 @@
 """Real HTTP/WAV checks. --local skips container-only checks for a local Python service."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import importlib.metadata
 import io
 import json
@@ -51,6 +52,19 @@ def validate_wav(result, text):
     return {"audio_seconds": seconds, "generation_seconds": float(headers["X-Generation-Seconds"]), "rms": rms}
 
 
+def verify_manifest(root):
+    """Offline: every bundled file except the notices and manifest is recorded with its staged hash."""
+    assets = {asset["path"]: asset for asset in json.loads((root / "assets.json").read_text())["assets"]}
+    files = sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
+    assert files == sorted([*assets, "NOTICES.md", "assets.json"]), "Bundled files and assets.json differ"
+    for path, asset in assets.items():
+        with (root / path).open("rb") as file:
+            assert hashlib.file_digest(file, "sha256").hexdigest() == asset["sha256"], f"Hash mismatch: {path}"
+        assert asset["kind"] in ("downloaded", "rewritten") and asset["source"]["sha256"]
+        assert asset["kind"] == "rewritten" or asset["source"]["sha256"] == asset["sha256"]
+    return len(assets)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--local", action="store_true")
@@ -69,6 +83,7 @@ if __name__ == "__main__":
     assert json.loads(result[2])["voices"] == ["jane", "bill_boerst", "estelle"]
     if not args.local:
         assert os.getuid() == 10001
+        verify_manifest(Path(os.environ["POCKET_TTS_MODEL_DIR"]))
     assert os.environ["HF_HUB_OFFLINE"] == "1"
     assert importlib.metadata.version("torch").endswith("+cpu")
     assert not any(d.metadata["Name"].lower().startswith("nvidia-") for d in importlib.metadata.distributions())
