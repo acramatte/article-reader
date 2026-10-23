@@ -377,11 +377,11 @@ function amountPattern(language) {
 }
 
 // "$50" → "fifty dollars", "$1.5B" → "one point five billion dollars", "€2 million" → "two million euros",
-// "50 $" → "cinquante dollars". A spoken symbol before a number is otherwise dropped by the model.
+// "$10/million" → "ten dollars per million", "50 $" → "cinquante dollars". A spoken symbol before a number is otherwise dropped by the model.
 function currencyEdits(text, language, edits) {
   const amount = amountPattern(language);
   const scales = String.raw`thousand|million|billion|trillion|mille|millions?|milliards?`;
-  const pattern = new RegExp(String.raw`(?<![\p{L}\p{N}_])([$€£])${space}?(${amount})(?:([KkMB])|${space}+(${scales}))?(?![\p{L}\p{N}_])|(?<![\p{L}\p{N}_.,])(${amount})${space}?([$€£])(?![\p{L}\p{N}_])`, "gu");
+  const pattern = new RegExp(String.raw`(?:(?<![\p{L}\p{N}_])([$€£])${space}?(${amount})(?:([KkMB])|${space}+(${scales}))?(?![\p{L}\p{N}_])|(?<![\p{L}\p{N}_.,])(${amount})${space}?([$€£])(?![\p{L}\p{N}_]))(\/(?=\p{L}))?`, "gu");
   for (const match of text.matchAll(pattern)) {
     const symbol = match[1] ?? match[6];
     const value = match[2] ?? match[5];
@@ -393,7 +393,7 @@ function currencyEdits(text, language, edits) {
     const [singular, many] = currencyNames[language][symbol];
     const name = !scale && value === "1" ? singular : many;
     const of = language === "fr" && /^milli/.test(scale ?? "") ? "de " : ""; // "deux millions de dollars"
-    edits.add(match.index, match.index + match[0].length, [spoken, scale, `${of}${name}`].filter(Boolean).join(" "));
+    edits.add(match.index, match.index + match[0].length, [spoken, scale, `${of}${name}`, match[7] && (language === "fr" ? "par" : "per")].filter(Boolean).join(" ") + (match[7] ? " " : ""));
   }
 }
 

@@ -56,6 +56,9 @@ test("numbers are spoken as words, with years, decimals, ordinals, suffixes and 
     "fifty dollars, one dollar, one point five billion dollars, two million euros, three point five zero pounds and twenty euros");
   assert.equal(speak("En 1999, 42 poules, 128 000 jetons, 1,5 kilo, 3,14, 75 %, 16 Go, 50 €, 3 000 $, 2 M$, 2 millions.", "fr"),
     "En mille neuf cent quatre-vingt-dix-neuf, quarante-deux poules, cent vingt-huit mille jetons, un virgule cinq kilo, trois virgule quatorze, soixante-quinze %, seize Go, cinquante euros, trois mille dollars, deux M$, deux millions.");
+  assert.equal(speak("$2.00/million tokens in, $10/million out, 5€/mois", "en"),
+    "two point zero zero dollars per million tokens in, ten dollars per million out, five euros per mois");
+  assert.equal(speak("5€/mois", "fr"), "cinq euros par mois");
   assert.equal(speak("$5 million and $2B", "fr"), "cinq millions de dollars and deux milliards de dollars");
 });
 
