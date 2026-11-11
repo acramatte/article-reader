@@ -1,5 +1,26 @@
 const validId = id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id);
 
+// The player is in exactly one phase, and only the moves listed here happen:
+//
+//   loading → generating → playing ⇄ paused        playing → finished
+//   loading or a connection drop → recovering → paused
+//   any active phase → stopping → stopped, or → error
+const TRANSITIONS = {
+  loading: ["generating", "recovering", "stopping", "error"],
+  generating: ["playing", "paused", "recovering", "finished", "stopping", "error"],
+  playing: ["paused", "recovering", "finished", "stopping", "error"],
+  paused: ["generating", "playing", "recovering", "finished", "stopping", "error"],
+  recovering: ["paused", "stopping", "error"],
+  stopping: ["stopped", "error"],
+  stopped: [], finished: [], error: [], disposed: [],
+};
+// The recording is in use: its requests, status events and bookmark are live.
+const ACTIVE = ["loading", "generating", "playing", "paused", "recovering"];
+// Audio is sounding or about to; these are the phases Pause leaves and Resume returns to.
+const PLAYABLE = ["generating", "playing"];
+// Recovery steps in order, with the progress each one reports.
+const RECOVERY_STEPS = { connecting: "connection", awaiting: "generation", attaching: "position", seeking: "position" };
+
 // The native media element owns playback; SSE is diagnostics/recovery only.
 export class StreamingPlayer {
   constructor({ audio, bookmarkReady, onUpdate, onRestore = () => {}, onTimeline = () => {}, fetchImpl = fetch,
@@ -11,12 +32,12 @@ export class StreamingPlayer {
     this.controller = new AbortController();
     this.statusRevision = 0;
     this.ready = bookmarkReady.then(bookmark => { this.bookmark = bookmark; });
-    this.state = "loading";
-    this.paused = false;
-    this.restoring = false;
-    this.recovered = false;
-    this.disposed = false;
-    this.stopping = false;
+    this.phase = "loading";
+    this.resumeTo = null; // While paused: the phase Resume returns to.
+    this.needsGesture = false; // While paused: autoplay was denied, so only a user gesture can resume.
+    this.recovery = null; // While recovering: { step, target, seek }.
+    this.recovered = false; // This player began from a bookmark instead of a new narration.
+    this.retryAvailable = false;
     this.waiting = false;
     this.playRevision = 0;
     this.firstAudioSeconds = null;
@@ -25,22 +46,22 @@ export class StreamingPlayer {
     this.startedAt = now();
     this.listeners = {
       playing: () => {
-        if (this.restoring || this.stopping || this.disposed || ["error", "stopped", "finished"].includes(this.state)) return;
-        this.paused = this.waiting = this.needsGesture = false;
-        this.state = "playing";
+        if (this.phase !== "playing" && !this.enter("playing")) return;
+        this.waiting = false;
         this.firstAudioSeconds ??= (this.now() - this.startedAt) / 1000;
         this.updateMediaSession();
         this.emit();
       },
       pause: () => {
-        if (this.stopping || this.disposed || this.audio.ended || ["error", "stopped", "finished"].includes(this.state)) return;
-        this.paused = true;
+        if (this.audio.ended) return;
+        // The browser can pause media itself; recovery and the closed phases pause it on purpose.
+        if (this.phase !== "paused" && !(PLAYABLE.includes(this.phase) && this.enter("paused"))) return;
         this.savePosition(true);
         this.updateMediaSession();
         this.emit();
       },
       waiting: () => {
-        if (!this.waiting && this.firstAudioSeconds !== null && !this.paused) this.underruns++;
+        if (!this.waiting && this.phase === "playing" && this.firstAudioSeconds !== null) this.underruns++;
         this.waiting = true;
         this.emit();
       },
@@ -51,24 +72,48 @@ export class StreamingPlayer {
       seeked: () => { this.restorePosition(); this.savePosition(true); },
       ended: () => void this.finish(),
       error: async () => {
-        if (this.stopping || this.disposed || !this.audio.error) return;
+        if (!this.active || !this.audio.error) return;
         const code = this.audio.error.code;
+        // Audio attached by a recovery failed as well: keep its target and attach again.
+        if (this.recovery) this.recovery.step = "connecting";
         await this.refresh(); // Prefer the provider's explicit error over a truncated-stream media error.
-        if (this.controller.signal.aborted || this.stopping || this.disposed || !this.audio.error) return;
-        // Network failures retain the bookmark; a completed file can be recovered.
-        if (code === 2 || this.restoring) {
+        if (!this.active || !this.audio.error) return;
+        if (!this.recovery) {
+          if (code !== 2) return this.fail(`Audio playback failed (code ${code}).`, true);
+          // Network failures retain the bookmark; a completed file can be recovered.
           this.savePosition(true);
-          this.restoring = true;
-          this.recovery ??= { id: this.id, title: this.title, positionSeconds: this.position() };
-          this.recoveryPhase = "connection";
-          this.warning = "Audio connection failed. Retry to recover the existing recording.";
-          this.retryAvailable = true;
-          this.audio.pause();
-          this.emit();
-        } else this.fail(`Audio playback failed (code ${code}).`, true);
+          this.enter("recovering", { target: this.position() });
+        }
+        this.warning = "Audio connection failed. Retry to recover the existing recording.";
+        this.retryAvailable = true;
+        this.audio.pause();
+        this.emit();
       },
     };
     for (const [name, listener] of Object.entries(this.listeners)) audio.addEventListener(name, listener);
+  }
+
+  get active() { return ACTIVE.includes(this.phase); }
+  get paused() { return this.phase === "paused" || this.phase === "recovering"; }
+  // The reported state keeps "generating"/"playing" across a pause, alongside `paused`.
+  get state() { return this.phase === "paused" ? this.resumeTo : this.phase; }
+
+  // The only place the phase changes. A move the table does not allow changes nothing and returns false.
+  enter(next, { target, needsGesture = false } = {}) {
+    const from = this.phase;
+    if (next !== "disposed" && !TRANSITIONS[from].includes(next)) return false;
+    this.phase = next;
+    // Data owned by one phase is built on entry and dropped on exit, so it cannot outlive that phase.
+    this.resumeTo = next === "paused" ? (PLAYABLE.includes(from) ? from : "playing") : null;
+    this.needsGesture = next === "paused" && needsGesture;
+    this.recovery = next === "recovering" ? { step: "connecting", target, seek: null } : null;
+    if (ACTIVE.includes(from) && !this.active) {
+      this.controller.abort();
+      this.closeStatus();
+      this.warning = null;
+      this.retryAvailable = false;
+    }
+    return true;
   }
 
   async json(path, { method = "GET", body, admission = false } = {}) {
@@ -88,7 +133,7 @@ export class StreamingPlayer {
   }
 
   emit() {
-    if (this.disposed) return;
+    if (this.phase === "disposed") return;
     let bufferedSeconds = 0;
     for (let i = 0; i < this.audio.buffered.length; i++) {
       if (this.audio.buffered.start(i) <= this.audio.currentTime + 0.05 && this.audio.buffered.end(i) >= this.audio.currentTime) {
@@ -100,27 +145,26 @@ export class StreamingPlayer {
       state: this.state, paused: this.paused, bufferedSeconds: this.waiting ? 0 : bufferedSeconds,
       completed: this.snapshot?.generated || 0, total: this.snapshot?.total || 0,
       firstAudioSeconds: this.firstAudioSeconds, underruns: this.underruns,
-      warming: Boolean(this.snapshot?.warming && this.firstAudioSeconds === null && !this.controller.signal.aborted),
+      warming: Boolean(this.snapshot?.warming && this.firstAudioSeconds === null && this.active),
       error: this.error, warning: this.warning || this.bookmark?.warning,
-      recovering: this.restoring, recovered: this.recovered, recoveryPhase: this.recoveryPhase,
-      positionSeconds: this.position(), retryAvailable: Boolean(this.retryAvailable), needsGesture: this.needsGesture,
+      recovering: this.phase === "recovering", recovered: this.recovered, recoveryPhase: RECOVERY_STEPS[this.recovery?.step],
+      positionSeconds: this.position(), retryAvailable: this.retryAvailable, needsGesture: this.needsGesture,
     });
   }
 
   async start(prepare) {
     try {
       await this.ready;
-      this.controller.signal.throwIfAborted();
+      if (!this.active) return;
       this.bookmark.clear();
       const content = await prepare(this.controller.signal);
-      this.controller.signal.throwIfAborted();
+      if (!this.enter("generating")) return;
       this.title = content.title || "Pasted text";
-      this.state = "generating";
       this.emit();
       // Do not abort admission on Stop: we need its acknowledged ID to cancel it.
       this.pendingCreation = this.json("/api/streaming", { method: "POST", body: content, admission: true });
       const result = await this.pendingCreation;
-      if (this.controller.signal.aborted) return;
+      if (!this.active) return;
       if (!validId(result.id)) throw new Error("The server returned an invalid recording identifier.");
       this.id = result.id;
       this.setTimeline(result.sentences);
@@ -129,23 +173,21 @@ export class StreamingPlayer {
       this.audio.src = `/api/streaming/${this.id}/audio`;
       this.bindMediaSession();
       this.connectStatus();
-      if (!this.paused) await this.play();
+      if (this.phase === "generating") await this.play(); // Not when Pause arrived before the admission did.
     } catch (error) {
-      if (!this.controller.signal.aborted) this.fail(error.message);
+      if (this.active) this.fail(error.message);
     }
   }
 
   async restore() {
     await this.ready;
-    if (this.controller.signal.aborted) return false;
+    if (this.phase !== "loading") return false;
     const record = this.bookmark.load();
     if (!record) return false;
     this.id = record.id;
     this.title = record.title;
-    this.recovery = record;
-    this.paused = this.restoring = this.recovered = true;
-    this.state = "restoring";
-    this.recoveryPhase = "connection";
+    this.recovered = true;
+    this.enter("recovering", { target: record.positionSeconds });
     this.emit();
     this.connectStatus();
     await this.refresh();
@@ -153,21 +195,22 @@ export class StreamingPlayer {
   }
 
   connectStatus() {
-    if (this.events || !this.id || this.controller.signal.aborted || ["ready", "error", "stopped"].includes(this.snapshot?.state)) return;
+    if (this.events || !this.id || !this.active || ["ready", "error", "stopped"].includes(this.snapshot?.state)) return;
     const events = this.events = this.eventSource(`/api/streaming/${this.id}/events`);
+    // Leaving the active phases closes the connection, so a stale source never matches.
     events.addEventListener("timing", event => {
-      if (this.events !== events || this.controller.signal.aborted) return;
+      if (this.events !== events) return;
       const { from, timings } = JSON.parse(event.data);
       this.setTimeline(undefined, timings, from);
     });
     events.addEventListener("status", event => {
-      if (this.events !== events || this.controller.signal.aborted) return;
+      if (this.events !== events) return;
       this.snapshotTask = this.applySnapshot(JSON.parse(event.data));
     });
     events.onerror = () => {
-      if (this.events !== events || this.controller.signal.aborted) return;
+      if (this.events !== events) return;
       this.warning = "Status connection interrupted. Reconnecting; the playback bookmark is retained.";
-      this.retryAvailable = this.restoring;
+      this.retryAvailable = this.phase === "recovering";
       this.emit();
       // Native EventSource retries transport errors. A permanent HTTP rejection
       // closes it; inspect the JSON endpoint once for an actionable expiry/error.
@@ -187,7 +230,7 @@ export class StreamingPlayer {
   }
 
   async refresh({ reconnect = true } = {}) {
-    if (!this.id || this.controller.signal.aborted || this.stopping || this.disposed) return;
+    if (!this.id || !this.active) return;
     if (this.refreshTask) return this.refreshTask;
     this.refreshTask = this.fetchStatus(reconnect);
     try { await this.refreshTask; }
@@ -198,12 +241,12 @@ export class StreamingPlayer {
     const revision = this.statusRevision;
     try {
       const snapshot = await this.json(`/api/streaming/${this.id}/status`);
-      if (this.controller.signal.aborted) return;
+      if (!this.active) return;
       // A delayed GET must not overwrite a newer event (especially ready/error).
       if (revision !== this.statusRevision) return await this.snapshotTask;
       await this.applySnapshot(snapshot);
       if (reconnect) this.connectStatus();
-      else if (!this.controller.signal.aborted && snapshot.state === "generating") {
+      else if (this.active && snapshot.state === "generating") {
         this.warning = "Status connection closed. Retry to reconnect; audio playback can continue.";
         this.retryAvailable = true;
         this.emit();
@@ -214,7 +257,7 @@ export class StreamingPlayer {
   }
 
   async applySnapshot(snapshot) {
-    if (this.controller.signal.aborted) return;
+    if (!this.active) return;
     this.statusRevision++;
     try {
       this.snapshot = snapshot;
@@ -222,36 +265,36 @@ export class StreamingPlayer {
       if (["error", "stopped"].includes(snapshot.state)) return this.fail(snapshot.error || "Recording was stopped. Start a new narration explicitly.");
       this.warning = null;
       this.retryAvailable = false;
-      if (this.restoring) {
+      if (this.recovery && !this.contentRestored) {
+        const content = await (this.contentTask ??= this.json(`/api/streaming/${this.id}/content`));
+        if (!this.active) return;
         if (!this.contentRestored) {
-          const content = await (this.contentTask ??= this.json(`/api/streaming/${this.id}/content`));
-          if (this.controller.signal.aborted) return;
-          if (!this.contentRestored) {
-            this.onRestore(content);
-            this.contentRestored = true;
-            this.setTimeline(content.sentences, content.timings);
-          }
+          this.onRestore(content);
+          this.contentRestored = true;
+          this.setTimeline(content.sentences, content.timings);
         }
+      }
+      const recovery = this.recovery; // A concurrent snapshot may have finished the recovery meanwhile.
+      if (recovery?.step === "connecting" || recovery?.step === "awaiting") {
         const complete = this.snapshot.state === "ready";
-        this.recoveryPhase = complete || this.snapshot.audioSecondsGenerated >= this.recovery.positionSeconds
-          ? "position" : "generation";
-        if ((!this.audio.getAttribute("src") || this.audio.error) && this.recoveryPhase === "position") {
+        if (complete || this.snapshot.audioSecondsGenerated >= recovery.target) {
           // A growing MP3 has no known length, so seeking into it downloads the whole prefix.
           // Start the same recording at the saved position instead; completed files seek by Range.
-          this.timeOffset = complete ? 0 : this.recovery.positionSeconds;
-          this.seekTarget = complete ? null : 0;
+          this.timeOffset = complete ? 0 : recovery.target;
+          recovery.seek = complete ? null : 0;
+          recovery.step = "attaching";
           this.audio.preload = "auto";
           this.audio.src = `/api/streaming/${this.id}/audio${this.timeOffset ? `?start=${this.timeOffset.toFixed(3)}` : ""}`;
           this.bindMediaSession();
           this.audio.load();
-        }
-        this.restorePosition();
+        } else recovery.step = "awaiting";
       }
+      this.restorePosition();
       // SSE closes on readiness, and a status GET can report it before the final timing events arrived.
       if (this.snapshot.state === "ready" && this.snapshot.timed > this.timings.length) {
         const { timings } = await (this.timingTask ??= this.json(`/api/streaming/${this.id}/content`)
           .finally(() => { this.timingTask = null; }));
-        if (this.controller.signal.aborted) return;
+        if (!this.active) return;
         this.setTimeline(undefined, timings);
       }
       this.emit();
@@ -262,38 +305,40 @@ export class StreamingPlayer {
   }
 
   statusFailure(error) {
-    if (this.controller.signal.aborted) return;
+    if (!this.active) return;
     if (error.status === 404) return this.fail("Recording expired or the server restarted. Start a new narration explicitly.");
     this.warning = `Could not reconnect: ${error.message}. The playback bookmark is retained.`;
-    this.retryAvailable = this.restoring;
+    this.retryAvailable = this.phase === "recovering";
     this.emit();
   }
 
+  // Recovery's last steps, driven by media events: the attached audio loads, seeks, then waits for Resume.
   restorePosition() {
-    if (!this.restoring || this.stopping || this.disposed || !this.contentRestored || this.audio.readyState < 1) return;
-    if (this.seekTarget == null) {
-      const complete = this.snapshot?.state === "ready";
-      if (complete ? !Number.isFinite(this.audio.duration) : !(this.snapshot?.audioSecondsGenerated >= this.recovery.positionSeconds)) return;
-      // Growing MP3 duration can be Infinity or an estimate of its current prefix.
-      // Only a completed recording has a final duration to clamp against.
-      this.seekTarget = complete
-        ? Math.min(this.recovery.positionSeconds, Math.max(0, this.audio.duration - 0.05))
-        : this.recovery.positionSeconds;
-      if (Math.abs(this.audio.currentTime - this.seekTarget) >= 0.05) {
-        this.audio.currentTime = this.seekTarget;
+    const recovery = this.recovery;
+    if (!recovery || this.audio.readyState < 1) return;
+    if (recovery.step === "attaching") {
+      if (recovery.seek === null) {
+        // Growing MP3 duration can be Infinity or an estimate of its current prefix.
+        // Only a completed recording has a final duration to clamp against.
+        if (!Number.isFinite(this.audio.duration)) return;
+        recovery.seek = Math.min(recovery.target, Math.max(0, this.audio.duration - 0.05));
+      }
+      recovery.step = "seeking";
+      if (Math.abs(this.audio.currentTime - recovery.seek) >= 0.05) {
+        this.audio.currentTime = recovery.seek;
         return;
       }
     }
-    if (this.audio.seeking || Math.abs(this.audio.currentTime - this.seekTarget) > 0.5) return;
-    this.restoring = false;
-    this.state = "playing";
+    if (recovery.step !== "seeking" || this.audio.seeking || Math.abs(this.audio.currentTime - recovery.seek) > 0.5) return;
+    this.enter("paused");
     this.waiting = false;
     this.savePosition(true);
     this.emit();
   }
 
   savePosition(force = false) {
-    if (!this.bookmark || !this.id || this.restoring || this.stopping || this.disposed || ["finished", "error", "stopped"].includes(this.state)) return;
+    // Recovery keeps the bookmark it is restoring until the position is reached.
+    if (!this.bookmark || !this.id || !this.active || this.recovery) return;
     this.bookmark.save({ id: this.id, title: this.title.slice(0, 200), positionSeconds: this.position() }, force);
   }
 
@@ -302,68 +347,60 @@ export class StreamingPlayer {
   }
 
   async play() {
-    if (this.restoring || this.stopping || this.disposed || ["error", "stopped", "finished"].includes(this.state)) return;
+    if (this.phase === "paused") this.enter(this.resumeTo);
+    else if (!PLAYABLE.includes(this.phase)) return;
     const version = ++this.playRevision;
-    this.paused = false;
-    this.needsGesture = false;
+    // A rejection only matters while this request is still the one meant to be playing.
+    const wanted = () => version === this.playRevision && PLAYABLE.includes(this.phase);
     this.emit();
     try { await this.audio.play(); }
     catch (error) {
-      if (this.controller.signal.aborted || this.stopping || this.disposed || version !== this.playRevision) return;
-      if (error.name === "NotAllowedError") { this.paused = this.needsGesture = true; this.emit(); }
+      if (!wanted()) return;
+      if (error.name === "NotAllowedError") { this.enter("paused", { needsGesture: true }); this.emit(); }
       else {
         await this.refresh(); // An HTTP/provider error can reject play before its status reply arrives.
-        if (!this.controller.signal.aborted && !this.stopping && !this.disposed && version === this.playRevision) this.fail(error.message, true);
+        if (wanted()) this.fail(error.message, true);
       }
     }
   }
 
   async togglePause() {
-    if (this.restoring || this.stopping || this.disposed || ["error", "stopped", "finished"].includes(this.state)) return;
-    if (this.paused) await this.play();
-    else { this.playRevision++; this.paused = true; this.audio.pause(); this.savePosition(true); this.updateMediaSession(); this.emit(); }
+    if (this.phase === "paused") return this.play();
+    if (!PLAYABLE.includes(this.phase)) return;
+    this.enter("paused");
+    this.audio.pause();
+    this.savePosition(true);
+    this.updateMediaSession();
+    this.emit();
   }
 
   async finish() {
     await this.refresh();
-    if (this.controller.signal.aborted || this.stopping || this.disposed || ["error", "stopped", "finished"].includes(this.state)) return;
+    if (!this.active) return;
     if (this.snapshot?.state !== "ready") return this.fail("Recording ended before synthesis completed.", true);
-    this.state = "finished";
-    this.paused = false;
-    this.closeStatus();
+    if (!this.enter("finished")) return;
     this.bookmark.clear();
     this.updateMediaSession();
     this.emit();
   }
 
   fail(message, cancel = false) {
-    if (this.stopping || this.disposed) return;
-    this.state = "error";
+    if (!this.active) return;
     this.error = message;
-    this.restoring = this.paused = false;
-    this.controller.abort();
-    this.closeStatus();
+    // A recording the server may still be generating is cancelled first; the error is final once that settles.
+    this.enter(cancel && this.id ? "stopping" : "error");
     this.bookmark?.clear();
     this.audio.pause();
     this.updateMediaSession();
     this.emit();
-    if (cancel && this.id) {
-      this.stopping = true;
-      this.state = "stopping";
-      this.emit();
-      void this.json(`/api/streaming/${this.id}/stop`, { method: "POST", body: {}, admission: true })
-        .catch(error => { this.warning = `Could not confirm cancellation: ${error.message}`; })
-        .finally(() => { this.stopping = false; this.state = "error"; this.updateMediaSession(); this.emit(); });
-    }
+    if (this.phase !== "stopping") return;
+    void this.json(`/api/streaming/${this.id}/stop`, { method: "POST", body: {}, admission: true })
+      .catch(error => { this.warning = `Could not confirm cancellation: ${error.message}`; })
+      .finally(() => { this.enter("error"); this.updateMediaSession(); this.emit(); });
   }
 
   async shutdown() {
-    if (this.stopping || this.disposed) return;
-    this.stopping = true;
-    this.state = "stopping";
-    this.paused = false;
-    this.controller.abort();
-    this.closeStatus();
+    if (!this.enter("stopping")) return;
     this.audio.pause();
     this.audio.removeAttribute("src");
     this.audio.load();
@@ -373,9 +410,11 @@ export class StreamingPlayer {
       this.bookmark.clear();
       const session = this.id ? { id: this.id } : await this.pendingCreation;
       if (session && validId(session.id)) await this.json(`/api/streaming/${session.id}/stop`, { method: "POST", body: {}, admission: true });
-      this.state = "stopped";
-    } catch (error) { this.state = "error"; this.error = `Could not confirm cancellation: ${error.message}`; }
-    finally { this.stopping = false; this.updateMediaSession(); this.emit(); }
+      this.enter("stopped");
+    } catch (error) {
+      this.error = `Could not confirm cancellation: ${error.message}`;
+      this.enter("error");
+    } finally { this.updateMediaSession(); this.emit(); }
   }
 
   bindMediaSession() {
@@ -389,26 +428,25 @@ export class StreamingPlayer {
 
   updateMediaSession() {
     if (!("mediaSession" in navigator)) return;
-    navigator.mediaSession.playbackState = ["error", "stopped", "finished"].includes(this.state) ? "none" : this.paused ? "paused" : "playing";
-    if (!this.restoring && Number.isFinite(this.audio.duration) && this.audio.duration > 0) {
+    navigator.mediaSession.playbackState = !this.active ? "none" : this.paused ? "paused" : "playing";
+    if (!this.recovery && Number.isFinite(this.audio.duration) && this.audio.duration > 0) {
       try { navigator.mediaSession.setPositionState({ duration: this.timeOffset + this.audio.duration, playbackRate: this.audio.playbackRate, position: this.timeOffset + Math.min(this.audio.currentTime, this.audio.duration) }); }
       catch { /* Some browsers do not implement position state. */ }
     }
   }
 
   dispose() {
-    if (this.disposed) return this.disposal;
+    if (this.phase === "disposed") return this.disposal;
     this.savePosition(true);
-    this.disposed = true;
-    this.controller.abort();
-    this.closeStatus();
+    const stopping = this.phase === "stopping";
+    this.enter("disposed");
     for (const [name, listener] of Object.entries(this.listeners)) this.audio.removeEventListener(name, listener);
     this.audio.pause();
     this.audio.removeAttribute("src");
     this.audio.load();
     // An unacknowledged admission has no bookmark to recover. Cancel only that orphan;
     // acknowledged recordings remain recoverable after local player disposal.
-    if (this.pendingCreation && !this.id && !this.stopping) {
+    if (this.pendingCreation && !this.id && !stopping) {
       this.disposal = this.pendingCreation.then(async session => {
         if (validId(session.id)) await this.json(`/api/streaming/${session.id}/stop`, { method: "POST", body: {}, admission: true });
       }).catch(error => { this.warning = `Could not confirm cancellation: ${error.message}`; });

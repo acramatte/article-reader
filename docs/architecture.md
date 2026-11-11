@@ -145,6 +145,30 @@ sequenceDiagram
 
 `GET /status` remains for explicit recovery/retry, permanent SSE rejection, media-error diagnosis and completion checks. Revision tracking prevents an older JSON response overwriting a newer SSE state. A recoverable connection failure retains the bookmark; expiry/server restart requires an explicitly new narration. `/content` returns 410 when content has been discarded. `/mark` records diagnostics (playback position and then-current counters), not a persistent browser bookmark.
 
+The player is in exactly one phase, and `stream-player.mjs` lists the only moves between them in one table. Leaving the active phases aborts requests, closes SSE and drops the warning and Retry offer, so a stopped, finished or failed player cannot still appear to be recovering.
+
+```mermaid
+stateDiagram-v2
+    [*] --> loading
+    state Active {
+        loading --> generating: text prepared
+        generating --> playing: first audio
+        generating --> paused: Pause or autoplay denied
+        playing --> paused: Pause
+        paused --> playing: Resume
+        loading --> recovering: bookmark found
+        playing --> recovering: audio connection drop
+        recovering --> paused: saved position restored
+    }
+    playing --> finished: recording ended
+    Active --> error: failure
+    Active --> stopping: Stop
+    stopping --> error: playback failed
+    stopping --> stopped
+```
+
+Recovery is a sequence inside its phase: connect, wait for audio at the target position, attach, seek. Its target position is set on entry (the bookmark after a reload, the playback position at a connection drop) and discarded on exit, so each drop resumes where it happened. A playback failure cancels its recording first and reports the error once the cancellation settles.
+
 Pause stops listening, not generation. Native media/network behavior can leave or close an audio connection; generation is bounded either way. Stop during admission waits for the acknowledged ID before sending cancellation, avoiding an orphan session. Disposal/reload leaves acknowledged recordings recoverable; an unacknowledged admission is cancelled once its ID arrives. Stop cannot interrupt speech computation already running inside the inference service.
 
 ## 7. Deployment view
