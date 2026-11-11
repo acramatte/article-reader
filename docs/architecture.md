@@ -201,6 +201,21 @@ Default configurable narration limits are 100,000 text characters, 64,000,000 au
 
 Text/metadata live temporarily in the process; MP3 lives in a private instance-owned spool (directory mode 0700, file mode 0600). Session/spool ownership locks prevent two processes sharing the same spool. Startup cleans abandoned/default instance spools and old session directories in its owned spool; restart never restores sessions. Ready keeps bounded recovery content; error/Stop discards text and audio. Error snapshots remain temporarily for diagnosis. Stop removes the recording; retention expiry also removes the session; shutdown stops all sessions.
 
+A session is in exactly one state, and `streaming.mjs` changes it in one place that refuses any move not drawn below. That place ends work still running, clears the timers, discards text unless the recording is ready, sets the expiry and publishes the new state, so no caller repeats the cleanup and a failure arriving after Stop cannot turn a stopped session into an error. A stopped session holds neither text nor audio and deliberately has no expiry of its own: its record stays, within the session limit, until admission evicts it or the server shuts down. Audio connections wait for the recording to grow or the state to change; they are woken by the change, not by polling.
+
+```mermaid
+stateDiagram-v2
+    [*] --> generating: admission
+    generating --> ready: encoder finished
+    generating --> error: failure or generation deadline
+    generating --> stopped: Stop or no audio consumers
+    ready --> stopped: Stop
+    error --> stopped: Stop
+    ready --> [*]: retention expiry or eviction
+    error --> [*]: retention expiry or eviction
+    stopped --> [*]: eviction
+```
+
 Browser storage holds only a validated recording reference, title and best-known playback position, not article text or audio. Completion/Stop clears its bookmark. Credentials never enter browser configuration. Remote inference receives text; operators with Docker access can inspect container credentials. Same-origin checks reject cross-origin/cross-site streaming reads and writes, and POSTs require JSON; these are not per-user authorization or abuse controls.
 
 Requests whose `Host` header is neither an IP literal, `localhost` nor a name listed in `ALLOWED_HOSTS` are rejected with 403, so a page that rebinds its own DNS name to this server cannot drive the API from a victim's browser. Every page response carries a strict Content-Security-Policy — same-origin scripts, styles, media, connect and images only; no framing, forms, plugins or base-URI override — in development and production alike. Internal errors are logged with details and returned to clients as generic messages; only errors explicitly marked with an HTTP status are shown.

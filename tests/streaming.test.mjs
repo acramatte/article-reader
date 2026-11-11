@@ -638,6 +638,30 @@ test("Stop cancels pending work, deletes spool and allows a fresh session", asyn
   assert.ok((await create()).id !== id);
 });
 
+test("Stop is final from every state, and a stopped session waits for eviction with no expiry", async t => {
+  const engine = new StreamingNarrations({ synthesizeChunk: async ({ text }, signal) => {
+    if (text.includes("Fail")) throw new Error("Stop-after-failure fixture");
+    if (text.includes("Hang")) await delay(10_000, undefined, { signal });
+    return wav(0.1);
+  } });
+  t.after(() => engine.close());
+  const create = text => engine.create({ text, voice: "jane", speed: 1 });
+  const ready = await create("Ready"); await ready.done;
+  const failed = await create("Fail"); await failed.done;
+  const generating = await create("Hang");
+  assert.deepEqual([ready, failed, generating].map(s => s.state), ["ready", "error", "generating"]);
+  for (const session of [ready, failed]) assert.ok(engine.snapshot(session).expiresAt > Date.now());
+  for (const session of [ready, failed, generating]) {
+    await engine.stop(session);
+    await engine.stop(session);
+    const { state, expiresAt } = engine.snapshot(session);
+    assert.deepEqual({ state, expiresAt }, { state: "stopped", expiresAt: null });
+    assert.equal(session.text, null);
+    assert.ok(engine.sessions.has(session.id));
+    await assert.rejects(readdir(session.directory), { code: "ENOENT" });
+  }
+});
+
 test("bounded admission, validation and cross-origin rejection happen before inference", async (t) => {
   let calls = 0;
   const { post, create } = await app(t, { synthesizeChunk: async (body, signal) => {

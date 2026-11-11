@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, open, readdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -9,6 +9,8 @@ import { runIsolated } from "./isolate.mjs";
 import { userError } from "./errors.mjs";
 
 const terminal = state => ["ready", "error", "stopped"].includes(state);
+// Every move a session can make. `transition` refuses anything else, so a late failure cannot revive a stopped session.
+const TRANSITIONS = { generating: ["ready", "error", "stopped"], ready: ["stopped"], error: ["stopped"], stopped: [] };
 // Each sentence also carries a pause, so a short one takes longer than its length alone suggests.
 // Estimated sentence times add this many characters per sentence; calibrated on Pocket TTS output.
 const sentencePauseChars = 12;
@@ -151,16 +153,10 @@ export class StreamingNarrations {
       sentences: plan.sentences.map(({ start, end }) => [start, end]), sentenceLengths: plan.sentences.map(s => s.length),
       chunkSentences: plan.chunks.map(chunk => chunk.sentences), timings: [],
       generated: 0, bytes: 0, audioSecondsGenerated: 0, startedAt: Date.now(), consumers: 0, firstByteSeconds: null,
-      subscribers: new Set(), replaying: 0 };
+      subscribers: new Set(), replaying: 0, changes: new EventEmitter().setMaxListeners(this.maxConsumers) };
     this.sessions.set(session.id, session);
     session.generationDeadline = Date.now() + this.generationMs;
-    session.generationTimer = setTimeout(() => {
-      session.error = "Narration generation timed out.";
-      session.text = null;
-      session.chunks.fill("");
-      session.controller.abort(new Error(session.error));
-      session.encoder?.kill("SIGKILL");
-    }, this.generationMs);
+    session.generationTimer = setTimeout(() => this.transition(session, "error", "Narration generation timed out."), this.generationMs);
     session.generationTimer.unref();
     this.armDisconnect(session);
     session.done = this.generate(session);
@@ -180,6 +176,7 @@ export class StreamingNarrations {
   }
 
   publish(session, { coalesce = false } = {}) {
+    session.changes.emit("change"); // Audio readers wait on this instead of polling.
     if (coalesce) {
       if (!session.subscribers.size || session.statusTimer) return;
       // Keep only one pending update, and snapshot the latest counters when it fires.
@@ -314,7 +311,7 @@ export class StreamingNarrations {
       await once(encoder, "spawn");
       signal.throwIfAborted();
       output = this.collectOutput(session, encoder);
-      output.catch(error => { session.outputError = error; session.controller.abort(); encoder.kill("SIGKILL"); });
+      output.catch(error => this.transition(session, "error", error.message));
       for (const [chunk, text] of session.chunks.entries()) {
         if (session.generated && session.paceSeconds) await delay(session.paceSeconds * 1000, undefined, { signal });
         signal.throwIfAborted();
@@ -336,54 +333,54 @@ export class StreamingNarrations {
       await output;
       signal.throwIfAborted();
       if (code !== 0 || !session.bytes) throw new Error("Audio encoder failed to produce a complete stream.");
-      session.state = "ready";
-      session.readyAt = Date.now();
-      this.retain(session);
+      this.transition(session, "ready");
     } catch (error) {
-      if (session.state !== "stopped") {
-        session.state = "error";
-        session.text = null;
-        session.chunks.fill("");
-        session.error ||= session.outputError?.message || (error.code === "ENOENT" ? "Audio encoder is unavailable." : error.message);
-      }
+      // Refused when a deadline, an output failure or Stop already ended the session.
+      this.transition(session, "error", error.code === "ENOENT" ? "Audio encoder is unavailable." : error.message);
     } finally {
-      session.warming = false;
-      clearTimeout(session.generationTimer);
-      clearTimeout(session.disconnectTimer);
-      encoder?.kill("SIGKILL");
       await Promise.allSettled([exited, output].filter(Boolean));
-      if (session.state !== "ready") {
-        session.text = null;
-        await rm(session.directory, { recursive: true, force: true });
-        if (session.state === "error") this.retain(session);
-      }
-      session.chunks.fill(""); // Only the bounded recovery snapshot retains ready-session text.
-      this.publish(session);
+      if (session.state !== "ready") await rm(session.directory, { recursive: true, force: true });
     }
   }
 
-  async stop(session) {
-    clearTimeout(session.generationTimer);
-    clearTimeout(session.retentionTimer);
-    clearTimeout(session.disconnectTimer);
-    session.expiresAt = null;
-    session.text = null;
-    session.chunks.fill("");
-    session.state = "stopped";
+  // The only place a session changes state. What each state keeps is decided here, once.
+  transition(session, next, error) {
+    if (!TRANSITIONS[session.state].includes(next)) return false;
+    session.state = next;
+    if (next === "error") session.error = error;
     session.warming = false;
-    this.publish(session);
+    clearTimeout(session.generationTimer);
+    clearTimeout(session.disconnectTimer);
+    clearTimeout(session.retentionTimer);
+    // Ends any work still running; a no-op once generation has finished.
     session.controller.abort();
     session.encoder?.kill("SIGKILL");
-    await session.done;
-    await rm(session.directory, { recursive: true, force: true });
+    // Only a ready recording keeps its text, as the bounded recovery snapshot.
+    if (next !== "ready") session.text = null;
+    session.chunks.fill("");
+    // A stopped session holds neither text nor audio and has no expiry: it waits for eviction.
+    session.expiresAt = null;
+    if (next !== "stopped") {
+      if (next === "ready") session.readyAt = Date.now();
+      session.expiresAt = Date.now() + this.retentionMs;
+      session.retentionTimer = setTimeout(() => {
+        void this.stop(session).then(() => this.sessions.delete(session.id)).catch(() => {});
+      }, this.retentionMs);
+      session.retentionTimer.unref();
+    }
+    this.publish(session);
+    return true;
   }
 
-  retain(session) {
-    session.expiresAt = Date.now() + this.retentionMs;
-    session.retentionTimer = setTimeout(() => {
-      void this.stop(session).then(() => this.sessions.delete(session.id)).catch(() => {});
-    }, this.retentionMs);
-    session.retentionTimer.unref();
+  // Resolves when the recording grows or the session changes; rejects when `signal` aborts.
+  changed(session, signal) {
+    return once(session.changes, "change", { signal });
+  }
+
+  async stop(session) {
+    this.transition(session, "stopped");
+    await session.done;
+    await rm(session.directory, { recursive: true, force: true }); // A ready recording still has its spool.
   }
 
   close() {
@@ -411,7 +408,7 @@ export class StreamingNarrations {
         if (offset + 4 > start + length) {
           while (offset + 4 > session.bytes) {
             if (terminal(session.state)) return previous;
-            await delay(100, undefined, { signal });
+            await this.changed(session, signal);
           }
           start = offset;
           ({ bytesRead: length } = await file.read(buffer, 0, Math.min(buffer.length, session.bytes - offset), offset));
@@ -444,7 +441,7 @@ export class StreamingNarrations {
     clearTimeout(session.disconnectTimer);
     let file;
     try {
-      while (!session.bytes && !terminal(session.state)) await delay(100, undefined, { signal });
+      while (!session.bytes && !terminal(session.state)) await this.changed(session, signal);
       const base = startSeconds > 0 && session.bytes ? await this.frameStart(session, startSeconds, signal) : 0;
       if (["stopped", "error"].includes(session.state)) {
         response.writeHead(session.state === "error" ? 502 : 410, { "Content-Type": "application/json",
@@ -491,7 +488,7 @@ export class StreamingNarrations {
           // Copy before reusing the read buffer; a slow client must not corrupt queued frames.
           if (!response.write(Buffer.from(buffer.subarray(0, bytesRead)))) await once(response, "drain", { signal });
         } else if (session.state === "ready" || offset >= end) { response.end(); break; }
-        else await delay(100, undefined, { signal });
+        else await this.changed(session, signal);
       }
     } catch (error) {
       if (!signal.aborted) response.destroy(error);
