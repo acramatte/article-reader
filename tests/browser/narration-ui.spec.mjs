@@ -185,3 +185,33 @@ test("Stop during synthetic warmup preserves cancellation and permits a fresh se
   await page.locator("#stop").click();
   await expect(page.locator("#status")).toHaveText("Stopped");
 });
+
+test("text edited after another URL fails can be read again and keeps its article's title and link (UI-only)", async ({ page }) => {
+  const fixture = await mockNarration(page);
+  let extractions = 0;
+  await page.route("**/api/article", route => ++extractions === 1
+    ? route.fulfill({ json: { title: "First article", byline: "Fixture", url: "https://example.com/first", text: "The first article was read." } })
+    : route.fulfill({ status: 422, json: { error: "No readable article found on this page." } }));
+  await page.goto("/");
+  await page.locator("#url").fill("https://example.com/first");
+  await page.locator("#read-url").click();
+  await expect(page.locator("#article-title")).toHaveText("First article");
+  await page.locator("#stop").click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
+  await page.locator("#url").fill("https://example.com/second");
+  await page.locator("#read-url").click();
+  await expect(page.locator("#fallback-advice")).toBeVisible();
+  await expect(page.locator("#read-start")).toBeHidden();
+  await page.locator("#editor-summary").click();
+  await page.locator("#text").fill("The first article, edited by hand.");
+  await expect(page.locator("#fallback-advice")).toBeHidden();
+  await expect(page.locator("#paste-fallback")).not.toHaveClass(/recommended/);
+  await page.screenshot({ path: test.info().outputPath("edited-after-failed-url.png"), fullPage: true });
+  await page.locator("#read-start").click();
+  await expect(page.locator("#status")).toHaveText("Playing");
+  expect(fixture.requests[1]).toMatchObject({ text: "The first article, edited by hand.", title: "First article", byline: "Fixture", sourceUrl: "https://example.com/first" });
+  await expect(page.locator("#article-title")).toHaveText("First article");
+  await expect(page.locator("#source")).toHaveAttribute("href", "https://example.com/first");
+  await page.locator("#stop").click();
+  await expect(page.locator("#status")).toHaveText("Stopped");
+});

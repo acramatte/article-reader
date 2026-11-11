@@ -39,6 +39,7 @@ Extract once, prepare speech without changing displayed text, then synthesize sm
 ```mermaid
 flowchart TD
     UI[main.js: reader UI] --> Player[stream-player.mjs: media and recovery]
+    UI --> Mode[reader-mode.mjs: page mode, controls and status text]
     UI --> Highlight[narration-highlight.mjs: sentence highlighting]
     Player --> HTTP[server.mjs: HTTP, static assets and policy]
     HTTP -->|extraction| Isolate[isolate.mjs: bounded worker, one at a time]
@@ -170,6 +171,30 @@ stateDiagram-v2
 Recovery is a sequence inside its phase: connect, wait for audio at the target position, attach, seek. Its target position is set on entry (the bookmark after a reload, the playback position at a connection drop) and discarded on exit, so each drop resumes where it happened. A playback failure cancels its recording first and reports the error once the cancellation settles.
 
 Pause stops listening, not generation. Native media/network behavior can leave or close an audio connection; generation is bounded either way. Stop during admission waits for the acknowledged ID before sending cancellation, avoiding an orphan session. Disposal/reload leaves acknowledged recordings recoverable; an unacknowledged admission is cancelled once its ID arrives. Stop cannot interrupt speech computation already running inside the inference service.
+
+### Reader page modes
+
+The page is in exactly one mode, and `reader-mode.mjs` derives every control from it: which buttons are shown and usable, the Read again label and the extraction advice. The player's phase arrives separately in its updates and supplies the status text, the activity indicator and Pause/Stop. `main.js` only writes the result to the DOM; it keeps the article's title, byline and URL itself, so text edited after extraction is narrated under its article's title and link.
+
+```mermaid
+stateDiagram-v2
+    [*] --> landing
+    landing --> fetching: Read URL
+    fetching --> article: article extracted
+    fetching --> failed: extraction error
+    fetching --> landing: Stop
+    article --> editing: narration ended
+    editing --> text: Read again
+    text --> editing: narration ended
+    landing --> editing: Paste text instead
+    failed --> editing: Paste text instead, or edit kept text
+    editing --> fetching: Read URL
+    failed --> fetching: Read URL
+    landing --> article: saved article restored
+    landing --> text: saved text restored
+```
+
+Only a narration ending moves the mode from the player's side. A URL read keeps the previous text and article panel until its own article arrives, so a failed extraction after an earlier read returns to that text as soon as it is edited.
 
 ## 7. Deployment view
 

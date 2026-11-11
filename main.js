@@ -1,5 +1,6 @@
 import { StreamingPlayer } from "./stream-player.mjs";
 import { NarrationHighlight } from "./narration-highlight.mjs";
+import { controls, hasText, isActive, settle, status as playerStatus } from "./reader-mode.mjs";
 import { PlaybackBookmark } from "./public/streaming-state.js";
 import { loadTtsSettings } from "./public/tts-settings.js";
 
@@ -11,47 +12,45 @@ const textArea = $("#text");
 const status = $("#status");
 const statusText = $("#status-text");
 let narrator = null;
-let active = false;
-let settingsLoaded = false;
-let source = "url";
-let hasReadText = false;
-let sessionHasText = false;
+// The page's state lives here; the DOM is only written from it.
+const reader = { mode: "landing", hasRead: false, ready: false };
+let active = false; // The current narration has not ended.
+let article = null; // Title, byline and URL of the extracted article the text came from; edits keep them.
+let shown = null; // The text in the article panel, once it is visible.
+let indicator = null;
 let pauseAnimations = [];
 const highlight = new NarrationHighlight({ container: $("#article-body"), audio: $("#narration-audio"),
   position: () => narrator?.position() ?? 0 });
 
 // The article panel always shows exactly the narrated text: sentence offsets address its text node.
 // Pasted text has no title, byline or source of its own.
-function showNarratedText(text, article = null) {
-  const panel = $("#article-panel");
+function showNarratedText(text) {
+  setText($("#article-title"), article ? article.title : "Pasted text");
   if (article) {
-    panel.dataset.source = "url";
-    setText($("#article-title"), article.title);
     setText($("#byline"), article.byline);
     setText($("#source"), article.url);
     $("#source").href = article.url;
-  } else if (panel.dataset.source !== "url") {
-    panel.dataset.source = "text";
-    setText($("#article-title"), "Pasted text");
   }
-  for (const element of [$("#byline"), $("#source").parentElement]) element.hidden = panel.dataset.source !== "url";
-  setText($("#article-body"), text);
-  panel.hidden = false;
+  for (const element of [$("#byline"), $("#source").parentElement]) element.hidden = !article;
+  setText($("#article-body"), shown = text);
+  $("#article-panel").hidden = false;
   setText($("#editor-summary"), "Edit article text");
 }
 
-function hasArticle() {
-  return !$("#article-panel").hidden && $("#article-panel").dataset.source === "url";
-}
-
-function renderSource() {
+function renderControls() {
+  const view = controls(reader, active);
   // Keep the same URL input mounted and focusable throughout the reveal.
-  if ($("#url").readOnly !== active) $("#url").readOnly = active;
-  setDisabled($("#read-url"), active || !settingsLoaded);
-  setDisabled($("#paste-fallback"), active);
-  for (const id of ["#voice", "#speed"]) setDisabled($(id), active || !settingsLoaded);
-  setDisabled($("#read-start"), active || !settingsLoaded || (source === "url" && !sessionHasText));
-  setText($("#read-start"), hasReadText || source === "url" ? "Read again" : "Read text");
+  if ($("#url").readOnly !== view.locked) $("#url").readOnly = view.locked;
+  for (const id of ["#paste-fallback", "#text"]) setDisabled($(id), view.locked);
+  for (const id of ["#read-url", "#voice", "#speed"]) setDisabled($(id), !view.canStart);
+  setDisabled($("#read-start"), !view.canReadText);
+  setText($("#read-start"), view.readTextLabel);
+  for (const id of ["#playback", "#listen-title"]) {
+    if ($(id).hidden === view.playback) $(id).hidden = !view.playback;
+  }
+  if (!view.playback) $("#diagnostics").hidden = true;
+  if ($("#fallback-advice").hidden === view.advice) $("#fallback-advice").hidden = !view.advice;
+  $("#paste-fallback").classList.toggle("recommended", view.advice);
 }
 
 function revealWorkspace() {
@@ -61,15 +60,13 @@ function revealWorkspace() {
 
 function openFallback() {
   if (active) return;
-  source = "text";
+  reader.mode = "editing";
   $("#listening-card").hidden = false;
   revealWorkspace();
-  $("#playback").hidden = false;
-  $("#listen-title").hidden = false;
   $("#editor").open = true;
   $("#paste-fallback").setAttribute("aria-expanded", "true");
-  if ($("#article-panel").hidden) setText($("#editor-summary"), "Paste article text");
-  renderSource();
+  if (shown === null) setText($("#editor-summary"), "Paste article text");
+  renderControls();
   textArea.focus({ preventScroll: true });
 }
 
@@ -95,65 +92,39 @@ function setDisabled(element, disabled) {
 function showFeedback(message) {
   $("#listening-card").hidden = false;
   setText(statusText, message);
-  for (const animation of pauseAnimations) animation.cancel();
-  pauseAnimations = [];
-  status.classList.remove("is-busy", "is-playing", "is-paused");
+  setIndicator(null);
 }
 
-function playbackLabel(update) {
-  if (update.recovering) {
-    return { connection: "Reconnecting to your recording…", generation: "Recording is still generating. Waiting to restore the saved position…", position: "Restoring your saved position…" }[update.recoveryPhase];
-  }
-  if (update.needsGesture) return "Tap Resume to start audio.";
-  if (update.recovered && update.paused && update.firstAudioSeconds === null) return "Saved recording ready. Press Resume.";
-  if (update.paused) return "Paused";
-  if (update.warming) return "Speech engine is waking up…";
-  if (update.state === "playing" && update.bufferedSeconds < 0.05) return "Buffering…";
-  return { loading: source === "url" ? "Fetching and extracting article…" : "Preparing narration…", generating: "Generating first audio…", playing: "Playing", stopping: "Stopping…", stopped: "Stopped", finished: "Finished", error: "Could not read article" }[update.state];
+function setIndicator(next) {
+  if (next === indicator) return;
+  // Capture the visible frame before removing the playback CSS animations.
+  const fallingBars = next === "paused" && indicator === "playing" && !matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? [...status.querySelectorAll(".status-equalizer span")].map((bar) => ({ bar, clip: getComputedStyle(bar).clipPath })) : [];
+  for (const animation of pauseAnimations) animation.cancel();
+  for (const name of ["busy", "playing", "paused"]) status.classList.toggle(`is-${name}`, name === next);
+  pauseAnimations = fallingBars.map(({ bar, clip }) => bar.animate(
+    [{ clipPath: clip }, { clipPath: "inset(12px 0px 0px)" }],
+    { duration: 450, easing: "ease-out" },
+  ));
+  indicator = next;
 }
 
 function render(update) {
   $("#listening-card").hidden = false;
-  active = !["stopped", "finished", "error"].includes(update.state);
+  active = isActive(update);
+  reader.mode = settle(reader.mode, update);
   if (active) highlight.update(); // Player updates include recovery offset changes, not only media events.
   else highlight.clear();
-  if (!active && sessionHasText) source = "text";
-  const hasPlayback = active || sessionHasText || source === "text";
-  for (const id of ["#playback", "#listen-title"]) {
-    if ($(id).hidden === hasPlayback) $(id).hidden = !hasPlayback;
-  }
-  if (!hasPlayback) $("#diagnostics").hidden = true;
-  setDisabled(textArea, active);
-  const extractionError = update.state === "error" && source === "url" && !sessionHasText && !update.recovered;
-  if ($("#fallback-advice").hidden !== !extractionError) $("#fallback-advice").hidden = !extractionError;
-  if ($("#paste-fallback").classList.contains("recommended") !== extractionError) $("#paste-fallback").classList.toggle("recommended", extractionError);
-  renderSource();
-  setDisabled($("#stop"), !active || update.state === "stopping");
-  setDisabled($("#pause"), !active || ["loading", "stopping"].includes(update.state) || update.recovering);
-  setText($("#pause"), update.paused ? "Resume" : "Pause");
-  const state = playbackLabel(update);
-  setText(statusText, update.error ? `${state}: ${update.error}` : state);
+  renderControls();
+  const view = playerStatus(reader.mode, update);
+  setDisabled($("#stop"), !view.canStop);
+  setDisabled($("#pause"), !view.canPause);
+  setText($("#pause"), view.pauseLabel);
+  setText(statusText, view.text);
+  setIndicator(view.indicator);
   $("#recovery-note").hidden = !update.warning;
   if (update.warning) setText($("#recovery-note"), update.warning);
   $("#reconnect").hidden = !update.retryAvailable;
-  const busy = Boolean(active && (update.warming || ["loading", "generating"].includes(update.state)) && !update.paused && !update.error);
-  if (status.classList.contains("is-busy") !== busy) status.classList.toggle("is-busy", busy);
-  const playing = Boolean(active && update.state === "playing" && update.bufferedSeconds >= 0.05 && !busy && !update.paused && !update.error);
-  const paused = Boolean(active && update.paused && !update.error);
-  const pauseChanged = status.classList.contains("is-paused") !== paused;
-  // Capture the visible frame before removing the playback CSS animations.
-  const fallingBars = pauseChanged && paused && status.classList.contains("is-playing") && !matchMedia("(prefers-reduced-motion: reduce)").matches
-    ? [...status.querySelectorAll(".status-equalizer span")].map((bar) => ({ bar, clip: getComputedStyle(bar).clipPath })) : [];
-  if (pauseChanged) {
-    for (const animation of pauseAnimations) animation.cancel();
-    pauseAnimations = [];
-  }
-  if (status.classList.contains("is-playing") !== playing) status.classList.toggle("is-playing", playing);
-  if (pauseChanged) status.classList.toggle("is-paused", paused);
-  pauseAnimations = fallingBars.length ? fallingBars.map(({ bar, clip }) => bar.animate(
-    [{ clipPath: clip }, { clipPath: "inset(12px 0px 0px)" }],
-    { duration: 450, easing: "ease-out" },
-  )) : pauseAnimations;
   setText($("#buffer"), `${update.bufferedSeconds.toFixed(1)} s`);
   setText($("#progress"), `${update.completed} / ${update.total}`);
   setText($("#first-audio"), update.firstAudioSeconds === null ? "—" : `${update.firstAudioSeconds.toFixed(2)} s`);
@@ -161,7 +132,7 @@ function render(update) {
 }
 
 function read(fromUrl) {
-  if (active || !settingsLoaded) return;
+  if (active || !reader.ready) return;
   const input = fromUrl ? $("#url").value.trim() : textArea.value.trim();
   if (!input) { showFeedback(fromUrl ? "Enter a webpage URL first." : "Enter some text first."); return; }
   if (!$("#narration-audio").canPlayType("audio/mpeg")) { showFeedback("This browser does not support MP3 audio playback."); return; }
@@ -177,7 +148,7 @@ function read(fromUrl) {
       onTimeline: () => {
         if (narrator !== session) return;
         // Pasted text moves from the editor to the article panel once the narration is accepted.
-        if ($("#article-panel").hidden || $("#article-body").textContent !== narrated) {
+        if (shown !== narrated) {
           showNarratedText(narrated);
           $("#editor").open = false;
         }
@@ -186,30 +157,28 @@ function read(fromUrl) {
     });
     const trigger = document.activeElement;
     narrator = session;
-    source = fromUrl ? "url" : "text";
-    sessionHasText = !fromUrl;
-    $("#playback").hidden = false;
-    $("#listen-title").hidden = false;
+    reader.mode = fromUrl ? "fetching" : "text";
+    if (!fromUrl) reader.hasRead = true;
     $("#diagnostics").hidden = false;
-    if (sessionHasText) hasReadText = true;
     render({ state: "loading", paused: false, bufferedSeconds: 0, completed: 0, total: 0, firstAudioSeconds: null, underruns: 0 });
     if (trigger === $("#read-url") || trigger === $("#read-start")) $("#stop").focus({ preventScroll: true });
     void session.start(async (signal) => {
       let text = input;
       if (fromUrl) {
-        const article = await (await post("/api/article", { url: input }, signal)).json();
+        const extracted = await (await post("/api/article", { url: input }, signal)).json();
         signal.throwIfAborted();
-        textArea.value = text = article.text;
-        sessionHasText = hasReadText = true;
-        showNarratedText(text, article);
+        textArea.value = text = extracted.text;
+        article = { title: extracted.title, byline: extracted.byline, url: extracted.url };
+        reader.mode = "article";
+        reader.hasRead = true;
+        showNarratedText(text);
         revealWorkspace();
         $("#editor").open = false;
         $("#paste-fallback").setAttribute("aria-expanded", "false");
-      } else if (hasArticle()) showNarratedText(text);
+      } else if (article) showNarratedText(text);
       narrated = text;
-      const fromArticle = hasArticle();
-      return { text, voice, speed, title: fromArticle ? $("#article-title").textContent.slice(0, 200) : "Pasted text",
-        byline: fromArticle ? $("#byline").textContent.slice(0, 500) : "", ...(fromArticle ? { sourceUrl: $("#source").href } : {}) };
+      return { text, voice, speed, title: article ? article.title.slice(0, 200) : "Pasted text",
+        byline: article ? article.byline.slice(0, 500) : "", ...(article ? { sourceUrl: article.url } : {}) };
     });
   } catch (error) { showFeedback(error.message); }
 }
@@ -231,9 +200,9 @@ $("#editor").addEventListener("toggle", () => {
 });
 textArea.addEventListener("input", () => {
   if (active) return;
-  source = "text";
-  if (!$("#article-panel").hidden) setText($("#article-body"), textArea.value);
-  renderSource();
+  reader.mode = "editing";
+  if (shown !== null) setText($("#article-body"), shown = textArea.value);
+  renderControls();
 });
 function updateSettingsSummary() {
   const selection = `${$("#voice").selectedOptions[0].textContent} · ${$("#speed").selectedOptions[0].textContent}`;
@@ -241,11 +210,11 @@ function updateSettingsSummary() {
   $("#voice-settings summary").setAttribute("aria-label", `Voice and speed: ${selection}`);
 }
 for (const id of ["#voice", "#speed"]) $(id).addEventListener("change", updateSettingsSummary);
-renderSource();
+renderControls();
 $("#pause").addEventListener("click", () => void narrator?.togglePause());
 $("#stop").addEventListener("click", async () => {
   await narrator?.shutdown();
-  $(sessionHasText || source === "text" ? "#read-start" : "#read-url").focus({ preventScroll: true });
+  $(hasText(reader.mode) ? "#read-start" : "#read-url").focus({ preventScroll: true });
 });
 $("#reconnect").addEventListener("click", () => void narrator?.refresh());
 // Leaving the page must not cancel server-owned synthesis or native playback.
@@ -259,31 +228,32 @@ const recovery = new StreamingPlayer({
   onTimeline: () => { if (narrator === recovery) highlight.setTimeline(recovery.sentences, recovery.timings); },
   onRestore: content => {
     if (narrator !== recovery) return;
-    source = content.sourceUrl ? "url" : "text";
-    sessionHasText = hasReadText = true;
+    reader.mode = content.sourceUrl ? "article" : "text";
+    reader.hasRead = true;
     textArea.value = content.text;
     $("#voice").value = content.voice;
     $("#speed").value = String(content.speed);
     updateSettingsSummary();
     if (content.sourceUrl) {
       $("#url").value = content.sourceUrl;
-      showNarratedText(content.text, { title: content.title, byline: content.byline, url: content.sourceUrl });
-    } else showNarratedText(content.text);
+      article = { title: content.title, byline: content.byline, url: content.sourceUrl };
+    }
+    showNarratedText(content.text);
     $("#diagnostics").hidden = false;
     revealWorkspace();
   },
 });
 narrator = recovery;
 void loadTtsSettings($("#voice")).then(async () => {
-  settingsLoaded = true;
+  reader.ready = true;
   updateSettingsSummary();
-  renderSource();
+  renderControls();
   // Recovery must set the saved voice only after its option exists.
   const restored = await recovery.restore();
   if (!restored && narrator === recovery && recovery.bookmark.warning) showFeedback(recovery.bookmark.warning);
 }).catch(error => {
   if (narrator !== recovery) return;
-  if (!settingsLoaded) {
+  if (!reader.ready) {
     setText($("#settings-summary"), "Voices unavailable");
     $("#voice-settings summary").setAttribute("aria-label", "Voice and speed: voices unavailable");
   }
