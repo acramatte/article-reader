@@ -20,12 +20,13 @@ class MediaFixture extends EventTarget {
     this.playbackRate = 1;
     this.playCalls = 0;
     this.buffered = { length: 1, start: () => 0, end: () => 12 };
+    this.error = null;
   }
   get currentTime() { return this.position; }
   set currentTime(value) { this.position = value; this.dispatchEvent(new Event("seeked")); }
   play() { this.playCalls++; this.paused = false; this.dispatchEvent(new Event("playing")); return Promise.resolve(); }
   pause() { if (!this.paused) { this.paused = true; this.dispatchEvent(new Event("pause")); } }
-  load() { if (this.src) this.dispatchEvent(new Event("loadedmetadata")); else this.position = 0; }
+  load() { this.position = 0; this.error = null; if (this.src) this.dispatchEvent(new Event("loadedmetadata")); }
   getAttribute(name) { return this[name] || null; }
   removeAttribute(name) { delete this[name]; }
 }
@@ -290,13 +291,19 @@ test("autoplay denial is recoverable with Resume, not a failed or regenerated re
 });
 
 test("natural completion clears the bookmark without changing server readiness to cancellation", async t => {
-  const { player, bookmark, calls, updates } = fixture(t, standard);
+  let expired = false;
+  const { player, bookmark, calls, updates } = fixture(t, path => expired ? { status: 404, body: { error: "Missing" } } : standard(path));
   await player.start(async () => content);
   await tick();
   await player.finish();
   assert.equal(bookmark.load(), null);
   assert.equal(updates.at(-1).state, "finished");
   assert.equal(calls.filter(call => call.path.endsWith("/stop")).length, 0);
+  // The page is shown again after the recording expired: a finished narration stays finished.
+  expired = true;
+  await player.refresh();
+  assert.equal(updates.at(-1).state, "finished");
+  assert.equal(updates.at(-1).error, undefined);
 });
 
 test("Pause before admission is acknowledged prevents automatic playback on its late response", async t => {
@@ -416,4 +423,81 @@ test("a ready status GET loads final sentence timings that SSE missed", async t 
   assert.equal(calls.filter(call => call.path.endsWith("/content")).length, 1);
   await player.refresh(); // Complete timings are not fetched again.
   assert.equal(calls.filter(call => call.path.endsWith("/content")).length, 1);
+});
+
+test("Stop during recovery ends stopped, with no recovery or Retry state left behind", async t => {
+  const { player, bookmark, updates } = fixture(t, path => {
+    if (path.endsWith("/stop")) return { stopped: true };
+    throw new Error("Offline fixture");
+  });
+  bookmark.save({ id, title: content.title, positionSeconds: 6 }, true);
+  await player.restore();
+  assert.equal(updates.at(-1).recovering, true);
+  assert.equal(updates.at(-1).retryAvailable, true);
+  await player.shutdown();
+  const { state, recovering, retryAvailable, paused } = updates.at(-1);
+  assert.deepEqual({ state, recovering, retryAvailable, paused }, { state: "stopped", recovering: false, retryAvailable: false, paused: false });
+});
+
+test("Stop after an autoplay denial no longer asks for a Resume gesture", async t => {
+  const { player, audio, updates } = fixture(t, standard);
+  audio.play = () => Promise.reject(new DOMException("Gesture required fixture", "NotAllowedError"));
+  await player.start(async () => content);
+  assert.equal(updates.at(-1).needsGesture, true);
+  await player.shutdown();
+  assert.equal(updates.at(-1).state, "stopped");
+  assert.equal(updates.at(-1).needsGesture, false);
+});
+
+test("a playback failure is reported once, after its cancellation, and never returns to a busy state", async t => {
+  const { player, audio, calls, updates } = fixture(t, path =>
+    path.endsWith("/status") ? { state: "generating", generated: 1, total: 3 } : standard(path));
+  await player.start(async () => content);
+  audio.error = { code: 3 };
+  audio.dispatchEvent(new Event("error"));
+  await tick();
+  const states = updates.map(update => update.state);
+  assert.deepEqual(states.slice(states.indexOf("error")), ["error"]);
+  assert.equal(states.at(-2), "stopping");
+  assert.match(updates.at(-1).error, /code 3/);
+  assert.equal(calls.filter(call => call.path.endsWith("/stop")).length, 1);
+});
+
+test("a play interrupted by the browser pausing media is not a fatal playback error", async t => {
+  let reject;
+  const pending = new Promise((_, fail) => { reject = fail; });
+  const { player, audio, updates } = fixture(t, standard);
+  audio.play = () => pending;
+  const starting = player.start(async () => content);
+  await tick();
+  audio.dispatchEvent(new Event("pause"));
+  reject(new DOMException("Interrupted fixture", "AbortError"));
+  await starting;
+  assert.equal(updates.at(-1).paused, true);
+  assert.equal(updates.at(-1).error, undefined);
+});
+
+test("each connection drop recovers at the position where it happened, not at an earlier bookmark", async t => {
+  const generating = { state: "generating", generated: 2, total: 9, audioSecondsGenerated: 400 };
+  const { player, audio, bookmark, updates } = fixture(t, path => path.endsWith("/status") ? generating : content);
+  audio.duration = Infinity;
+  bookmark.save({ id, title: content.title, positionSeconds: 6 }, true);
+  await player.restore();
+  assert.equal(audio.src, `/api/streaming/${id}/audio?start=6.000`);
+  const dropAfter = async seconds => {
+    await player.togglePause();
+    audio.position = seconds; // Seconds into the attached audio, which starts at the previous recovery position.
+    audio.error = { code: 2 };
+    audio.dispatchEvent(new Event("error"));
+    await tick();
+    assert.equal(updates.at(-1).recovering, true);
+    await player.refresh(); // Retry
+    assert.equal(updates.at(-1).recovering, false);
+  };
+  await dropAfter(44);
+  assert.equal(audio.src, `/api/streaming/${id}/audio?start=50.000`);
+  assert.equal(updates.at(-1).positionSeconds, 50);
+  await dropAfter(30);
+  assert.equal(audio.src, `/api/streaming/${id}/audio?start=80.000`);
+  assert.equal(bookmark.load().positionSeconds, 80);
 });
