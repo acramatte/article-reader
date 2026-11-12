@@ -82,7 +82,7 @@ npm test
 npm run build
 ```
 
-Unit/integration tests cover extraction and SSRF protections, chunking, speech preparation and its mapping to highlighted text, provider retries, native-player state and recovery, bounded streaming, concurrency, deadlines, retention, spool isolation, cancellation and shutdown. Encoder tests deliberately use synthetic WAV tones with real FFmpeg.
+Unit/integration tests cover extraction and SSRF protections, chunking, speech preparation and its mapping to highlighted text, provider retries, native-player state and recovery, bounded streaming, concurrency, deadlines, retention, spool isolation, cancellation and shutdown. A packaging test checks that `.dockerignore` sends every Dockerfile `COPY` source to the builder and that each image stage copies every local module its entry points load. Encoder tests deliberately use synthetic WAV tones with real FFmpeg.
 
 For real browser playback tests, keep the local Pocket TTS service running, then run:
 
