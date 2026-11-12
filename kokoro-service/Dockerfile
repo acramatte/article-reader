@@ -7,7 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends libsndfile1 espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt ./
-RUN pip install -r requirements.txt && pip check
+RUN pip install --require-hashes -r requirements.txt && pip check
 COPY prepare_assets.py ./
 RUN python prepare_assets.py /opt/kokoro
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1

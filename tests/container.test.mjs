@@ -75,3 +75,16 @@ test("each image stage copies every local module its entry points load", () => {
     assert.deepEqual(missing, [], `Add these to the ${stage} stage's COPY in the Dockerfile`);
   }
 });
+
+test("inference images install only hash-locked requirements", () => {
+  for (const service of ["pocket-tts-service", "kokoro-service"]) {
+    const requirements = read(`${service}/requirements.txt`).replace(/\\\n/g, " ").split("\n")
+      .map(line => line.trim()).filter(line => line && !line.startsWith("#") && !line.startsWith("--"));
+    assert.ok(requirements.length > 0, service);
+    // Regenerate with the command at the top of requirements.txt, which includes --generate-hashes.
+    assert.deepEqual(requirements.filter(line => !/^\S+(?:==\S+| @ \S+) .*--hash=sha256:[0-9a-f]{64}/.test(line)), [], `${service}: unpinned or unhashed`);
+    const installs = read(`${service}/Dockerfile`).split("\n").filter(line => /\bpip install\b/.test(line));
+    assert.ok(installs.length > 0 && installs.every(line => line.includes("--require-hashes")), `${service}: pip install needs --require-hashes`);
+  }
+});
+

@@ -7,7 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt ./
-RUN pip install -r requirements.txt && pip check
+RUN pip install --require-hashes -r requirements.txt && pip check
 COPY prepare_assets.py ./
 RUN python prepare_assets.py /opt/pocket-tts && rm -rf /tmp/huggingface
 ENV HF_HUB_OFFLINE=1
