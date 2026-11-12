@@ -58,7 +58,7 @@ The `/spool` tmpfs is charged to the same limit. Recordings take about 0.5 MiB p
 
 ## VPN-only access and browser HTTPS
 
-Compose explicitly publishes only `10.0.0.1`, never all host addresses. Inside the container, Node must bind `0.0.0.0` so Docker can reach it; this does not mean the host publishes on every interface. No host networking or Docker socket is mounted.
+Compose explicitly publishes only `10.0.0.1`, never all host addresses. `npm test` reads the template through `docker compose config` and fails if any service publishes a port on another address, uses host networking, mounts host paths, or loses its hardening (read-only root, no capabilities, no-new-privileges, memory/CPU/PID and log limits); CI always runs it, and it is skipped locally only when the Compose CLI is missing. Inside the container, Node must bind `0.0.0.0` so Docker can reach it; this does not mean the host publishes on every interface. No host networking or Docker socket is mounted.
 
 Binding a destination IP is not an ingress-interface firewall rule. Verify Docker forwarding/NAT rules as well as the host firewall: restrict the reader port to the actual WireGuard interface and reject non-VPN ingress using the VPS's existing Docker-aware firewall policy (e.g. DOCKER-USER where appropriate). Do not assume UFW alone controls published Docker ports, and do not rewrite rules for existing services. Validate all of these on the actual VPS:
 

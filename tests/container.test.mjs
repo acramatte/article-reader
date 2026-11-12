@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 
@@ -88,3 +89,37 @@ test("inference images install only hash-locked requirements", () => {
   }
 });
 
+// Compose's own reading of compose.yaml, after interpolation. Needs the Docker Compose CLI, not a daemon; CI always runs it.
+function composeConfig(env) {
+  try {
+    return JSON.parse(execFileSync("docker", ["compose", "-f", join(root, "compose.yaml"), "config", "--format", "json"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { PATH: process.env.PATH, READER_IMAGE: "reader:test",
+        TTS_URL: "https://tts.example.test/tts", READER_INFERENCE_ENV_FILE: "/dev/null", ...env } }));
+  } catch (error) {
+    if (error.code === "ENOENT" || /unknown (?:command|shorthand flag)|is not a docker command/.test(error.stderr)) return null;
+    throw error;
+  }
+}
+
+test("the Compose template publishes only on the WireGuard address, hardened and bounded", t => {
+  for (const env of [{}, { READER_PORT: "9000" }]) {
+    const config = composeConfig(env);
+    if (!config) {
+      assert.ok(!process.env.CI, "CI must have the Docker Compose CLI");
+      return t.skip("Docker Compose CLI not installed");
+    }
+    for (const [name, service] of Object.entries(config.services)) {
+      for (const port of service.ports ?? []) assert.equal(port.host_ip, "10.0.0.1", `${name} publishes ${port.published} beyond WireGuard`);
+      assert.equal(service.network_mode, undefined, `${name}: no host networking`);
+      assert.ok(!service.privileged, `${name}: not privileged`);
+      assert.deepEqual(service.volumes ?? [], [], `${name}: no host mounts (the Docker socket least of all)`);
+      assert.equal(service.read_only, true, `${name}: read-only root filesystem`);
+      assert.deepEqual(service.cap_drop, ["ALL"], `${name}: drops all capabilities`);
+      assert.deepEqual(service.cap_add ?? [], [], `${name}: adds no capabilities`);
+      assert.ok(service.security_opt?.includes("no-new-privileges:true"), `${name}: no-new-privileges`);
+      for (const limit of ["mem_limit", "cpus", "pids_limit"]) assert.ok(Number(service[limit]) > 0, `${name}: ${limit} set`);
+      assert.ok(service.logging?.options?.["max-size"] && service.logging.options["max-file"], `${name}: bounded logs`);
+    }
+    assert.equal(config.services.reader.ports.length, 1);
+  }
+});
