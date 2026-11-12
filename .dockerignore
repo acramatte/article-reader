@@ -23,5 +23,6 @@
 !streaming.mjs
 !streaming-api.mjs
 !tts-provider.mjs
+!reader-mode.mjs
 !stream-player.mjs
 !narration-highlight.mjs
