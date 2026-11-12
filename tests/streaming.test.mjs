@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
-import { chmod, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readdir, rm, statfs } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -465,6 +466,34 @@ test("normal server SIGTERM/SIGINT close connections, inference and the spool", 
     assert.deepEqual(await readdir(spool), []);
     await assert.rejects(readdir(`${spool}.lock`), error => error.code === "ENOENT");
   }
+});
+
+test("the server refuses at startup a spool smaller than its sessions' byte limits", { timeout: 30_000 }, async t => {
+  const parent = existsSync("/dev/shm") ? "/dev/shm" : tmpdir();
+  const spool = await mkdtemp(join(parent, "reader-capacity-test-"));
+  t.after(() => rm(spool, { recursive: true, force: true }));
+  const { bavail, bsize } = await statfs(spool);
+  if (bavail * bsize >= 100 * 1_000_000_000) return t.skip("needs a filesystem with less than 100 GB free");
+  const serve = env => spawn(process.execPath, ["server.mjs"], { stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, HOST: "127.0.0.1", PORT: "0", STREAM_SPOOL_DIR: spool, ...env } });
+  const output = async child => { let text = ""; for await (const piece of child.stdout.setEncoding("utf8")) text += piece; return text; };
+
+  const refused = serve({ STREAM_MAX_SESSIONS: "100", STREAM_MAX_AUDIO_BYTES: "1000000000" });
+  t.after(() => refused.kill("SIGKILL"));
+  let errors = "";
+  refused.stderr.setEncoding("utf8").on("data", piece => { errors += piece; });
+  const [stdout, [code]] = await Promise.all([output(refused), once(refused, "exit")]);
+  assert.equal(code, 1);
+  assert.match(errors, /has \d+ MiB free, but STREAM_MAX_SESSIONS × STREAM_MAX_AUDIO_BYTES needs 95367 MiB/);
+  assert.doesNotMatch(stdout, /Article backend/, "it never listened");
+  assert.deepEqual(await readdir(spool), [], "its lock is released");
+
+  const started = serve({});
+  t.after(() => started.kill("SIGKILL"));
+  const [listening] = await once(started.stdout.setEncoding("utf8"), "data");
+  assert.match(listening, /Article backend/);
+  started.kill("SIGTERM");
+  assert.deepEqual(await once(started, "exit"), [0, null]);
 });
 
 test("WAV parsing validates actual PCM layout and chunk boundaries", () => {

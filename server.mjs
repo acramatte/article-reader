@@ -162,6 +162,17 @@ export function shutdownServer(server) {
   })();
 }
 
+// Listens once the spool is ready, so a spool too small for the configured limits fails startup
+// rather than the first narration.
+export function start(server, port, host, announce) {
+  installShutdown(server);
+  server.narrations.ready().then(() => server.listen(port, host, announce), error => {
+    console.error(error.message);
+    process.exitCode = 1;
+    void server.shutdown();
+  });
+}
+
 export function installShutdown(server) {
   const shutdown = () => { void server.shutdown().catch(error => { console.error(error.message); process.exitCode = 1; }); };
   process.once("SIGTERM", shutdown);
@@ -171,6 +182,5 @@ export function installShutdown(server) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 3001);
   const host = process.env.HOST || "127.0.0.1";
-  const server = createApp().listen(port, host, () => console.log(`Article backend: http://${host}:${port}`));
-  installShutdown(server);
+  start(createApp(), port, host, () => console.log(`Article backend: http://${host}:${port}`));
 }

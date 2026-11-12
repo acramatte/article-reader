@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, open, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readdir, readFile, rm, statfs } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
@@ -119,6 +119,25 @@ export class StreamingNarrations {
         await rm(join(this.spoolDir, entry.name), { recursive: true, force: true });
       }
     }
+    // Every retained session may reach the byte limit. A smaller spool fails narrations midway with a
+    // storage error, so refuse it here; a memory-backed one also counts against the container's memory.
+    const mib = bytes => Math.floor(bytes / 2 ** 20);
+    const needed = this.maxSessions * this.maxAudioBytes;
+    const { type, bavail, bsize } = await statfs(this.spoolDir);
+    if (bavail * bsize < needed) {
+      throw new Error(`Streaming spool ${this.spoolDir} has ${mib(bavail * bsize)} MiB free, but STREAM_MAX_SESSIONS × ` +
+        `STREAM_MAX_AUDIO_BYTES needs ${mib(needed)} MiB. Enlarge the spool or lower those limits.`);
+    }
+    const memoryMax = Number(await readFile("/sys/fs/cgroup/memory.max", "utf8").catch(() => NaN));
+    if (type === 0x01021994 && memoryMax < needed + this.planHeapMb * 2 ** 20) {
+      console.warn(`Streaming spool is tmpfs: full recordings (${mib(needed)} MiB) and narration planning ` +
+        `(${this.planHeapMb} MiB) exceed the ${mib(memoryMax)} MiB memory limit, which would restart the server.`);
+    }
+  }
+
+  // Prepares the spool once; admission waits for it, and servers check it before listening.
+  ready() {
+    return this.spoolReady ??= this.prepareSpool();
   }
 
   processAlive(pid) {
@@ -135,7 +154,7 @@ export class StreamingNarrations {
       throw userError(/[\p{L}\p{N}]/u.test(text) ? "Nothing to narrate: the text only contains links."
         : "Narration requires at least one letter or number.", 400);
     }
-    await (this.spoolReady ??= this.prepareSpool());
+    await this.ready();
     if (this.closed) throw userError("Narration server is shutting down.", 503);
     if (this.sessions.size >= this.maxSessions) {
       const oldest = [...this.sessions.values()].find(s => !s.consumers && terminal(s.state));

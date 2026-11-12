@@ -62,7 +62,7 @@ The first physical Android/Brave run confirmed screen-off playback: 24 chunks we
 
 ## Container packaging
 
-The standard image includes FFmpeg and defaults to `node server.mjs`, now providing streaming in the normal reader. The diagnostic entry point can still be selected with `node streaming-server.mjs`. Production Compose and the real-inference smoke use `STREAM_SPOOL_DIR=/spool` with a 272-MiB bounded tmpfs owned by UID 1000; the small `/tmp` alone is not sufficient for the default aggregate recording bound. The ownership lock is inside the writable spool, not its read-only parent.
+The standard image includes FFmpeg and defaults to `node server.mjs`, now providing streaming in the normal reader. The diagnostic entry point can still be selected with `node streaming-server.mjs`. Production Compose and the real-inference smoke use `STREAM_SPOOL_DIR=/spool` with a 272-MiB bounded tmpfs owned by UID 1000; the small `/tmp` alone is not sufficient for the default aggregate recording bound, and the reader refuses to start on it. The packaging smoke mounts the same spool. The ownership lock is inside the writable spool, not its read-only parent.
 
 These local Compose changes are not a deployment; existing VPS services are not modified. FFmpeg adds runtime image weight and needs measurement under the real deployment limits. The existing base image remains digest-pinned; Debian FFmpeg packages follow the configured security repositories, not a snapshot lock.
 

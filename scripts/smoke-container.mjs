@@ -6,7 +6,8 @@ const image = process.argv[2] || "article-reader:local";
 const docker = (...args) => execFileSync("docker", args, { encoding: "utf8" }).trim();
 const id = docker("run", "--detach", "--rm", "--init", "--read-only", "--cap-drop=ALL",
   "--security-opt=no-new-privileges:true", "--memory=512m", "--cpus=1", "--pids-limit=128",
-  "--tmpfs", "/tmp:size=16m,mode=1777", "--publish", "127.0.0.1::3001", image);
+  "--tmpfs", "/tmp:size=16m,mode=1777", "--tmpfs", "/spool:size=272m,mode=0700,uid=1000,gid=1000",
+  "--env", "STREAM_SPOOL_DIR=/spool", "--publish", "127.0.0.1::3001", image);
 try {
   const port = docker("port", id, "3001/tcp").split(":").at(-1);
   const base = `http://127.0.0.1:${port}`;

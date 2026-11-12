@@ -41,7 +41,7 @@ Set these environment variables on the **Node backend**, not Vite:
 | `STREAM_DISCONNECT_MS` | `120000` | Two-minute grace without audio consumers while generating; status requests/SSE do not extend it. |
 | `STREAM_MAX_SESSIONS` | `4` | Retained session limit; inactive terminal sessions may be evicted for admission. |
 | `STREAM_MAX_CONSUMERS` | `4` | Concurrent audio connections per recording; further requests get 429/Retry-After. |
-| `STREAM_SPOOL_DIR` | Instance-specific temporary directory | Dedicated writable spool, exclusive to this server; set an owned bounded tmpfs in read-only containers. |
+| `STREAM_SPOOL_DIR` | Instance-specific temporary directory | Dedicated writable spool, exclusive to this server; set an owned bounded tmpfs in read-only containers. Startup fails if it has less free space than `STREAM_MAX_SESSIONS × STREAM_MAX_AUDIO_BYTES`, and warns when a tmpfs spool plus planning heap exceeds the cgroup memory limit. |
 
 ### External provider contract
 
