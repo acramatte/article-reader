@@ -30,7 +30,7 @@ Set these environment variables on the **Node backend**, not Vite:
 | --- | --- | --- |
 | `TTS_ENGINE` | `pocket` | Startup engine selection: `pocket` or `kokoro`. Unset or empty uses `pocket`; unknown values fail startup. Must match `TTS_URL`. |
 | `TTS_URL` | `http://127.0.0.1:8000/tts` | Full speech-generation endpoint. |
-| `TTS_TOKEN` | Unset | Optional server-side Bearer token. Never use a `VITE_*` variable for it. |
+| `TTS_TOKEN` | Unset | Optional server-side Bearer token. Never use a `VITE_*` variable for it. Startup fails if it is set with a plain-HTTP `TTS_URL` that is not loopback (`localhost`, `127.x.x.x`, `[::1]`). |
 | `PORT` | `3001` | Reader backend port. |
 | `HOST` | `127.0.0.1` | Reader backend bind address. |
 | `ALLOWED_HOSTS` | Unset | Comma-separated host names the reader answers to, besides IP addresses and `localhost` (always allowed). Other `Host` headers get 403, which blocks DNS-rebinding pages. Set it when browsing the reader by name, e.g. `reader.example.internal`. |

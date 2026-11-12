@@ -230,6 +230,18 @@ test("unknown engines fail at startup instead of falling back to Pocket TTS", ()
   }
 });
 
+test("a TTS token is sent over plain HTTP only to loopback", () => {
+  const ttsToken = "test-only-token";
+  for (const ttsUrl of ["http://10.0.0.5:8000/tts", "http://pocket-tts:8000/tts", "http://localhost.example.com/tts",
+    "http://127.0.0.1.nip.io/tts", "http://[::ffff:7f00:1]/tts", "http://[fe80::1]/tts"]) {
+    assert.throws(() => createApp({ ttsUrl, ttsToken }), /TTS_TOKEN requires an HTTPS TTS_URL/, ttsUrl);
+  }
+  for (const ttsUrl of ["https://tts.example.test/tts", "http://127.0.0.1:8000/tts", "http://127.8.0.1/tts", "http://LOCALHOST:8000/tts", "http://[::1]:8000/tts"]) {
+    assert.doesNotThrow(() => createApp({ ttsUrl, ttsToken }), ttsUrl);
+  }
+  assert.doesNotThrow(() => createApp({ ttsUrl: "http://pocket-tts:8000/tts" }), "no token, nothing to expose");
+});
+
 test("an unset or empty TTS_ENGINE environment variable selects Pocket TTS", async t => {
   const previous = process.env.TTS_ENGINE;
   t.after(() => { if (previous === undefined) delete process.env.TTS_ENGINE; else process.env.TTS_ENGINE = previous; });

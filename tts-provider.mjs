@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { synthesizeSpeech } from "./tts-client.mjs";
 import { userError } from "./errors.mjs";
 
@@ -22,6 +23,10 @@ export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthes
   const config = { engine: ttsEngine, ...engines[ttsEngine] };
   const endpoint = new URL(ttsUrl);
   if (!["http:", "https:"].includes(endpoint.protocol)) throw new Error("TTS_URL must use HTTP or HTTPS.");
+  // Plain HTTP exposes the bearer token to every hop; only loopback traffic stays on this machine.
+  const loopback = endpoint.hostname === "localhost" || endpoint.hostname === "[::1]" ||
+    (isIP(endpoint.hostname) === 4 && endpoint.hostname.startsWith("127."));
+  if (ttsToken && endpoint.protocol === "http:" && !loopback) throw new Error("TTS_TOKEN requires an HTTPS TTS_URL (plain HTTP only to loopback).");
   const fetchWav = async (body, signal) => {
     const upstream = await synthesize(endpoint, {
       method: "POST", redirect: "error",
