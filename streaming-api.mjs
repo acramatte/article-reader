@@ -4,7 +4,7 @@ import { userError } from "./errors.mjs";
 const metadataLimits = { title: 200, byline: 500, sourceUrl: 2048 };
 const metadataBodyBytes = 6 * Object.values(metadataLimits).reduce((sum, size) => sum + size, 0) + 1024;
 
-const limits = {
+export const limits = {
   maxTextChars: ["STREAM_MAX_TEXT_CHARS", 100_000, 1_000_000],
   maxAudioBytes: ["STREAM_MAX_AUDIO_BYTES", 64_000_000, 1_000_000_000],
   generationMs: ["STREAM_GENERATION_MS", 1_200_000, 86_400_000],

@@ -24,7 +24,7 @@ Wait for `GET http://127.0.0.1:8000/health` to return 200 before using the reade
 
 ## Backend configuration
 
-Set these environment variables on the **Node backend**, not Vite:
+Set these environment variables on the **Node backend**, not Vite. `npm test` checks that this table lists every variable the backend reads, with the code's defaults:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
