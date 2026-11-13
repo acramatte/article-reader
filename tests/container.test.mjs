@@ -123,3 +123,18 @@ test("the Compose template publishes only on the WireGuard address, hardened and
     assert.equal(config.services.reader.ports.length, 1);
   }
 });
+
+test("CI, orb setup and both image stages run the Node version in .nvmrc", () => {
+  const version = read(".nvmrc").trim();
+  assert.match(version, /^\d+\.\d+\.\d+$/);
+  const bases = [...read("Dockerfile").matchAll(/^FROM node:(\S+?)-/gm)].map(match => match[1]);
+  assert.deepEqual(bases, [version, version], "update the Dockerfile's node:<version> tags and their digests together with .nvmrc");
+  for (const workflow of readdirSync(join(root, ".github/workflows"))) {
+    const source = read(join(".github/workflows", workflow));
+    assert.doesNotMatch(source, /node-version:/, `${workflow}: use node-version-file: .nvmrc`);
+    for (const step of source.split(/\n\s+- /).filter(step => step.includes("actions/setup-node@"))) {
+      assert.match(step, /node-version-file: \.nvmrc/, `${workflow}: setup-node reads .nvmrc`);
+    }
+  }
+  assert.match(read(".agents/setup"), /^node_version="\$\(tr -d '\[:space:\]' < \.nvmrc\)"$/m, "orb setup reads .nvmrc");
+});

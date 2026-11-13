@@ -16,8 +16,8 @@ step() {
   echo "    $name took $((SECONDS - start))s"
 }
 
-# Keep in sync with .github/workflows/*.yml and the Dockerfile base image.
-node_version="24.21.0"
+# .nvmrc is the one Node version for CI, orbs and the Dockerfile base image (npm test checks the image).
+node_version="$(tr -d '[:space:]' < .nvmrc)"
 node_dir="$HOME/.local/share/node/v$node_version"
 
 install_node() {

@@ -22,7 +22,7 @@ This is an early reader, not a finished podcast player. Prototype screen-off pla
 
 ## Quick start
 
-Requirements: **Node 24**, **FFmpeg with `libmp3lame`**, and **Docker**. Run from the project root.
+Requirements: **Node 24** (`.nvmrc` pins the exact version CI and the image use), **FFmpeg with `libmp3lame`**, and **Docker**. Run from the project root.
 
 ### 1. Start speech inference
 
