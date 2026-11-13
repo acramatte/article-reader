@@ -45,7 +45,7 @@ Set these environment variables on the **Node backend**, not Vite:
 
 ### External provider contract
 
-An external speech endpoint must accept `{text, voice, speed: 1}` JSON with the selected engine's voices and return a complete mono 24-kHz PCM16 `audio/wav` response. Pocket uses `jane`, `bill_boerst` and `estelle`; Kokoro uses `af_heart`, `am_michael` and `ff_siwis`. Pair `TTS_ENGINE`, `TTS_URL` and endpoint credentials when deploying or rolling back (see [reader/inference pairing](deployment.md#readerinference-pairing)).
+An external speech endpoint must accept `{text, voice, speed: 1}` JSON with the selected engine's voices and return a complete mono 24-kHz PCM16 `audio/wav` response. Pocket uses `jane`, `bill_boerst` and `estelle`; Kokoro uses `af_heart`, `am_michael` and `ff_siwis`. An endpoint that rejects the selected voice with a 422 naming the `voice` field is reported as an engine mismatch. Pair `TTS_ENGINE`, `TTS_URL` and endpoint credentials when deploying or rolling back (see [reader/inference pairing](deployment.md#readerinference-pairing)).
 
 `/api/config` exposes only public engine/voice metadata and streaming limits, never the endpoint or token. The raw `/api/tts` WAV route accepts only speed 1; adjusted speeds are available through streaming narration. HF's default Transformers runtime is not a drop-in replacement; use a matching custom inference image.
 

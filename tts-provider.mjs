@@ -17,6 +17,17 @@ const engines = {
   ] },
 };
 
+async function read(response, limit) {
+  const pieces = [];
+  let size = 0;
+  for await (const piece of response.body ?? []) {
+    size += piece.length;
+    if (size > limit) throw userError("TTS response exceeded the size limit.", 502);
+    pieces.push(piece);
+  }
+  return Buffer.concat(pieces);
+}
+
 // One provider boundary for the legacy WAV API and continuous narration.
 export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthesize = fetch }) {
   if (!Object.hasOwn(engines, ttsEngine)) throw new Error("TTS_ENGINE must be pocket or kokoro.");
@@ -38,7 +49,13 @@ export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthes
       throw error;
     });
     if (!upstream.ok) {
+      // Both inference services reject a voice outside their catalog with FastAPI's 422 naming that field, and the
+      // reader sends only its own engine's voices: the endpoint serves another engine than TTS_ENGINE.
+      const detail = upstream.status === 422 ? await read(upstream, 65_536).then(bytes => JSON.parse(bytes).detail, () => null) : null;
       await upstream.body?.cancel();
+      if (Array.isArray(detail) && detail.some(problem => Array.isArray(problem?.loc) && problem.loc.at(-1) === "voice")) {
+        return Response.json({ error: `The speech endpoint does not offer the ${config.name} voice "${body.voice}". Set TTS_ENGINE to the engine at TTS_URL.` }, { status: 502 });
+      }
       // Both statuses reject a request before synthesis starts, so callers may retry them.
       const retryable = {
         503: { code: "INFERENCE_UNAVAILABLE", error: "Speech engine is temporarily unavailable or starting up." },
@@ -55,19 +72,13 @@ export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthes
       await upstream.body?.cancel();
       throw userError(`${config.name} did not return WAV audio.`, 502);
     }
-    const pieces = [];
-    let size = 0;
-    for await (const piece of upstream.body) {
-      size += piece.length;
-      if (size > 12_000_000) throw userError("TTS audio exceeded the size limit.", 502);
-      pieces.push(piece);
-    }
+    const wav = await read(upstream, 12_000_000);
     const headers = { "Content-Type": "audio/wav" };
     for (const name of ["X-Audio-Seconds", "X-Generation-Seconds", "X-RTF", "X-Device"]) {
       const value = upstream.headers.get(name);
       if (value) headers[name] = value;
     }
-    return new Response(Buffer.concat(pieces), { headers });
+    return new Response(wav, { headers });
   };
   return {
     config,

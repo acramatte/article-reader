@@ -12,7 +12,7 @@ The primary user is a reader on desktop or mobile; operators need bounded resour
 
 - Browser JavaScript uses same-origin APIs; Node owns extraction, synthesis orchestration and FFmpeg encoding. No browser model download is needed.
 - A configured provider supplies complete mono 24-kHz PCM16 WAV chunks at synthesis speed 1. Node applies playback speed 0.5–2 with FFmpeg `atempo`.
-- Pocket TTS is the default; Kokoro is opt-in. Engine, voice catalog and endpoint must match; there is no automatic detection or failover.
+- Pocket TTS is the default; Kokoro is opt-in. Engine, voice catalog and endpoint must match; there is no automatic switching or failover, but a mismatched endpoint fails the first chunk with an explicit engine-mismatch error.
 - Sessions belong to one reader process. There is no durable database, distributed session routing, cross-tab coordination or offline narration.
 - Only one narration may generate per reader instance, with no admission waiting queue. Inference capacity is a separate constraint.
 - The reader answers only to IP literals, `localhost`, and names listed in `ALLOWED_HOSTS`; every page carries a strict Content-Security-Policy; internal errors are logged with details and returned generically.

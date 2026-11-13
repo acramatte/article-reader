@@ -405,6 +405,31 @@ test("upstream errors and non-WAV responses become actionable API errors", async
   }
 });
 
+test("an endpoint serving another engine fails narration with an engine mismatch, not a bare HTTP 422", async t => {
+  // FastAPI's 422 bodies from the real request models of each inference service.
+  const rejected = (voice, catalog) => ({ detail: [{ type: "literal_error", loc: ["body", "voice"],
+    msg: `Input should be ${catalog}`, input: voice }] });
+  const pattern = { detail: [{ type: "string_pattern_mismatch", loc: ["body", "text"], msg: "String should match pattern", input: "!!" }] };
+  for (const [ttsEngine, voice, name, body, expected] of [
+    ["pocket", "jane", "Pocket TTS", rejected("jane", "'af_heart', 'af_nicole', 'am_michael' or 'ff_siwis'"),
+      `The speech endpoint does not offer the Pocket TTS voice "jane". Set TTS_ENGINE to the engine at TTS_URL.`],
+    ["kokoro", "af_heart", "Kokoro", rejected("af_heart", "'jane', 'bill_boerst' or 'estelle'"),
+      `The speech endpoint does not offer the Kokoro voice "af_heart". Set TTS_ENGINE to the engine at TTS_URL.`],
+    ["pocket", "jane", "Pocket TTS", pattern, "Pocket TTS returned HTTP 422."],
+    ["pocket", "jane", "Pocket TTS", { detail: [{ loc: ["body", "voice"], msg: "x".repeat(70_000) }] }, "Pocket TTS returned HTTP 422."],
+  ]) {
+    let calls = 0;
+    const { base, post, server } = await streamingReader(t, { ttsEngine, synthesizeChunk: undefined,
+      synthesize: async () => { calls++; return Response.json(body, { status: 422 }); } });
+    const { id } = await (await post("/api/streaming", { text: "Engine check.", voice, speed: 1 })).json();
+    await server.narrations.sessions.get(id).done;
+    const status = await (await fetch(`${base}/api/streaming/${id}/status`)).json();
+    assert.equal(status.state, "error", name);
+    assert.equal(status.error, expected);
+    assert.equal(calls, 1, "a rejected request is not retried");
+  }
+});
+
 // Node's fetch always sends the connection's Host, so these requests set it explicitly.
 function requestAs(server, host, path, { method = "GET", body, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
