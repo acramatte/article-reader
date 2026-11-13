@@ -28,7 +28,7 @@ async function read(response, limit) {
   return Buffer.concat(pieces);
 }
 
-// One provider boundary for the legacy WAV API and continuous narration.
+// The boundary between narration and the inference service.
 export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthesize = fetch }) {
   if (!Object.hasOwn(engines, ttsEngine)) throw new Error("TTS_ENGINE must be pocket or kokoro.");
   const config = { engine: ttsEngine, ...engines[ttsEngine] };
@@ -61,8 +61,7 @@ export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthes
         503: { code: "INFERENCE_UNAVAILABLE", error: "Speech engine is temporarily unavailable or starting up." },
         429: { code: "INFERENCE_BUSY", error: `${config.name} is busy with other speech. Please try again shortly.` },
       }[upstream.status];
-      // The crafted body is itself the user-facing error; the /api/tts route relays it directly,
-      // outside the generic catch, so no marking is needed here.
+      // synthesizeSpeech retries the coded statuses and turns any other `error` into a user-facing one.
       return new Response(JSON.stringify(retryable || { error: `${config.name} returned HTTP ${upstream.status}.` }), {
         status: retryable ? upstream.status : 502,
         headers: { "Content-Type": "application/json", "Retry-After": upstream.headers.get("Retry-After") || "2" },
@@ -72,17 +71,10 @@ export function speechProvider({ ttsEngine = "pocket", ttsUrl, ttsToken, synthes
       await upstream.body?.cancel();
       throw userError(`${config.name} did not return WAV audio.`, 502);
     }
-    const wav = await read(upstream, 12_000_000);
-    const headers = { "Content-Type": "audio/wav" };
-    for (const name of ["X-Audio-Seconds", "X-Generation-Seconds", "X-RTF", "X-Device"]) {
-      const value = upstream.headers.get(name);
-      if (value) headers[name] = value;
-    }
-    return new Response(wav, { headers });
+    return new Response(await read(upstream, 12_000_000));
   };
   return {
     config,
-    fetchWav,
     synthesizeChunk: (body, signal, onWaiting) => synthesizeSpeech(body, signal, onWaiting, {
       fetchSpeech: (_path, request) => fetchWav(JSON.parse(request.body), request.signal),
     }),

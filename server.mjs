@@ -99,27 +99,6 @@ export function createApp({
         catch (error) { if (error.name !== "TimeoutError") throw userError(error.message, error.status ?? 422); throw error; }
         finally { extracting = false; }
       }
-      if (request.method === "POST" && url.pathname === "/api/tts") {
-        const body = await readJson(request);
-        if (typeof body?.text !== "string" || !/[\p{L}\p{N}]/u.test(body.text) || body.text.length > 1_000 ||
-            !voices.has(body.voice) || body.speed !== 1) {
-          return json(400, { error: "Raw WAV requires 1–1,000 characters containing a letter or number, a supported voice, and speed 1. Use /api/streaming for adjusted speed." });
-        }
-        const upstream = await provider.fetchWav({ text: body.text, voice: body.voice, speed: body.speed },
-          AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]));
-        if (!upstream.ok) {
-          const retryAfter = upstream.headers.get("Retry-After");
-          const headers = [429, 503].includes(upstream.status) && retryAfter !== null ? { "Retry-After": retryAfter } : {};
-          return json(upstream.status, await upstream.json(), headers);
-        }
-        const headers = { "Content-Type": "audio/wav", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
-        for (const name of ["X-Audio-Seconds", "X-Generation-Seconds", "X-RTF", "X-Device"]) {
-          const value = upstream.headers.get(name);
-          if (value) headers[name] = value;
-        }
-        response.writeHead(200, headers);
-        return response.end(Buffer.from(await upstream.arrayBuffer()));
-      }
       if (request.method === "GET" && url.pathname === "/api/health") return json(200, { status: "ok" });
       if (url.pathname.startsWith("/api/")) return json(404, { error: "API route not found." });
       if (request.method !== "GET") return json(405, { error: "Method not allowed." });
@@ -143,8 +122,7 @@ export function createApp({
       if (Number.isSafeInteger(error.status)) return json(error.status, { error: error.message },
         error.status === 429 ? { "Retry-After": "2" } : {});
       if (error.name !== "TimeoutError") console.error(request.method, request.url, error.name, error.message);
-      json(request.url.startsWith("/api/tts") ? 502 : 400,
-        { error: error.name === "TimeoutError" ? "The request timed out." : "The request could not be completed." });
+      json(400, { error: error.name === "TimeoutError" ? "The request timed out." : "The request could not be completed." });
     }
   });
   server.narrations = streaming.narrations;

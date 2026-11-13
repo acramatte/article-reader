@@ -58,7 +58,7 @@ flowchart TD
     Spool --> Player
 ```
 
-`server.mjs` exposes `/api/config`, `/api/article`, `/api/health`, the compatibility `/api/tts` WAV route and streaming routes. `/api/health` checks the reader, not inference. Compatibility WAV accepts 1–1,000 characters containing a letter/number, a supported voice and speed 1; the reader's normal narration uses `/api/streaming`.
+`server.mjs` exposes `/api/config`, `/api/article`, `/api/health` and the streaming routes. `/api/health` checks the reader, not inference. Speech is synthesized only for narrations admitted through `/api/streaming`; the former raw WAV route `/api/tts` was removed because nothing called it and it bypassed the single-generation limit.
 
 `streaming-api.mjs` validates admission and bounded metadata (title 200, byline 500, source URL 2,048 characters). `streaming.mjs` owns the session map, admission exclusion, encoder lifetime, temporary files, subscribers, generation/retention timers and audio consumers. `tts-provider.mjs` keeps credentials server-side, rejects redirects and non-WAV responses, bounds each returned WAV at 12,000,000 bytes, and supplies the configured voice catalog.
 
@@ -307,7 +307,7 @@ Existing automated and manual checks are cataloged in [development](development.
 
 - Sentence timing is estimated inside a chunk. One Pocket TTS sample showed about 0.2 seconds average and 0.6 seconds worst-case boundary error; this is sample evidence, not a guarantee ([experiments](experiments.md)).
 - Growing MP3s do not provide arbitrary seeking; a recovered growing stream cannot seek before its restored start. Completed recordings support byte ranges. Offline narration and guaranteed unkillable mobile playback are not implemented. Use one playback tab.
-- Inference compute/queue capacity limits concurrent listening. Models are shared per inference worker, not loaded for each user; the reader's single-generation limit does not bound compatibility WAV traffic or provide per-user rate limits/cost control.
+- Inference compute/queue capacity limits concurrent listening. Models are shared per inference worker, not loaded for each user; the reader's single-generation limit bounds its own synthesis traffic but provides no per-user rate limits/cost control.
 - Extended local Kokoro CPU testing previously showed memory growth and OOM at a 6-GiB container limit, not an observed HF endpoint failure. Restart restored service but did not fix the cause. Pocket passed a bounded 30-request mixed-language run without OOM; longer production testing is still needed. See [known inference follow-up](streaming-spike.md) and [HF evidence](hf-inference.md).
 - Server restarts and image replacements invalidate recovery. Spool/memory provisioning must track configured limits: startup refuses a spool with less free space than sessions × recording bytes and warns when a tmpfs spool could exceed the memory limit, but free space consumed by other processes after startup can still fail a recording early.
 - Extraction and narrow speech heuristics cannot understand every website or expression; ambiguous dates, grammatical gender and citations have deliberate limits described above.
