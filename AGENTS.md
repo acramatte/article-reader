@@ -20,7 +20,7 @@ Run `npm test` and `npm run build` before calling work done; run the browser sui
 
 ## Commit, branch & PR conventions
 
-**Commits** use imperative mood with a Conventional-Commits-style type prefix (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`; an optional scope such as `fix(security):` is fine). The body leads with WHY ("Add X so that Y" / "Replace X with Y so that Z"), then a design-decisions paragraph (what was extracted/shared and why), then a final `Tests:` line listing the exact test command(s) run. Keep commits focused; squash related refinements.
+**Commits** use imperative mood with a Conventional-Commits-style type prefix (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`; an optional scope such as `fix(security):` is fine). The body leads with WHY ("Add X so that Y" / "Replace X with Y so that Z"), then a design-decisions paragraph (what was extracted/shared and why), then a final `Tests:` line listing the exact test command(s) run. Keep commits focused; squash related refinements. CI enforces the type prefix, the `Tests:` line and the absence of merge commits; check locally with `node scripts/check-commits.mjs origin/main HEAD`.
 
 ```
 feat: <imperative subject>

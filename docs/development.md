@@ -84,6 +84,8 @@ npm run build
 
 Unit/integration tests cover extraction and SSRF protections, chunking, speech preparation and its mapping to highlighted text, provider retries, native-player state and recovery, bounded streaming, concurrency, deadlines, retention, spool isolation, cancellation and shutdown. A packaging test checks that `.dockerignore` sends every Dockerfile `COPY` source to the builder and that each image stage copies every local module its entry points load. Encoder tests deliberately use synthetic WAV tones with real FFmpeg.
 
+CI's Commits workflow runs `node scripts/check-commits.mjs BASE HEAD` on every push to `main` and every pull request: each added commit needs a Conventional-Commits type (`feat`, `fix`, `refactor`, `docs`, `test`, `chore`) and a `Tests:` line, and merge commits fail (rebase instead). Run it locally before pushing, e.g. `node scripts/check-commits.mjs origin/main HEAD`.
+
 For real browser playback tests, keep the local Pocket TTS service running, then run:
 
 ```sh
