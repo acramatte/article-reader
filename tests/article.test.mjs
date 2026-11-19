@@ -15,6 +15,14 @@ test("Readability extracts paragraphs without menus, ads, or scripts", () => {
   assert.throws(() => extractArticle("<html><p>Empty</p></html>", "https://example.com"), /readable|enough/);
 });
 
+test("MathML keeps its rendered text, not its LaTeX annotation", () => {
+  // arXiv HTML: "τ3\tau^{3} Banking" and "best-of-NN" were narrated with the source of each formula.
+  const math = (tex, mathml) => `<math alttext="${tex}"><semantics>${mathml}<annotation encoding="application/x-tex">${tex}</annotation></semantics></math>`;
+  const page = `<html><body><article><h1>Results</h1><p>Across ${math("\\tau^{3}", "<msup><mi>τ</mi><mn>3</mn></msup>")} Banking, best-of-${math("N", "<mi>N</mi>")} selects from six candidates. ${"Further text follows here. ".repeat(10)}</p></article></body></html>`;
+  const { text } = extractArticle(page, "https://arxiv.org/html/1");
+  assert.match(text, /Across τ3 Banking, best-of-N selects/);
+});
+
 test("chunking keeps all text, respects first/regular limits, and preserves paragraphs", () => {
   for (const text of [paragraphs.join("\n\n"), "word ".repeat(900), "x".repeat(1500), "One. Two! Three?", "  \n\n "]) {
     const chunks = chunkText(text);

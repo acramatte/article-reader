@@ -131,7 +131,9 @@ export function extractArticle(html, url) {
     const content = new JSDOM(article.content);
     try {
       const document = content.window.document;
-      document.querySelectorAll("script,style,nav,aside,form,button,iframe").forEach((node) => node.remove());
+      // MathML annotations hold the formula's source (arXiv's LaTeX): "τ3\tau^{3}" next to the rendered "τ3".
+      document.querySelectorAll("script,style,nav,aside,form,button,iframe,annotation,annotation-xml")
+        .forEach((node) => node.remove());
       const normalize = (text) => text.replace(/\s+/g, " ").trim();
       const blocks = [...document.querySelectorAll("h1,h2,h3,h4,h5,h6,p,li,pre,blockquote")]
         .filter((node) => !node.querySelector("p,li,pre,blockquote"))
