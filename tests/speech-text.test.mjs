@@ -23,6 +23,11 @@ test("reported pronunciation failures are spoken as intended", () => {
     'This blog post contains "Chapter zero: T L D R" of my latest book.');
   assert.equal(speak("tl;dr; TL;DR: done. Tl;Dr", "fr"), "T L D R; T L D R: done. T L D R");
   for (const text of ["xTL;DR", "TL;DRs", "a;b", "TL; DR"]) assert.equal(speak(text), text, text);
+  // The lowercase letter of a mixed-case acronym was swallowed: "Verify by Doing (VbD)" was spoken "V D".
+  assert.equal(speak("We introduce Verify by Doing (VbD), and VbD’s gains on IoT."),
+    "We introduce Verify by Doing (V B D), and V B D’s gains on I O T.");
+  assert.equal(speak("Le VbD marche.", "fr"), "Le V B D marche.");
+  for (const text of ["MHz", "Vbd", "VBD", "aVbD", "VbDs", "LoRA", "PyTorch"]) assert.equal(speak(text), text, text);
 });
 
 test("common variants of the reported cases", () => {

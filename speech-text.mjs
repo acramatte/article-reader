@@ -182,6 +182,11 @@ function languageEdits(text, language, edits) {
   for (const match of text.matchAll(/(?<![\p{L}\p{N}_])tl;dr(?![\p{L}\p{N}_])/giu)) {
     edits.add(match.index, match.index + match[0].length, "T L D R");
   }
+  // "VbD", "BoN", "IoT": a lowercase letter between capitals was swallowed ("VbD" → "V D"). Spelled out like TL;DR.
+  // Units ("MHz") are words, not letters.
+  for (const match of text.matchAll(/(?<![\p{L}\p{N}_])\p{Lu}\p{Ll}\p{Lu}(?![\p{L}\p{N}_])/gu)) {
+    if (!Object.hasOwn(unitNames, match[0])) edits.add(match.index, match.index + 3, [...match[0].toUpperCase()].join(" "));
+  }
   abbreviationEdits(text, language, edits);
   phoneEdits(text, language, edits);
   dateEdits(text, language, edits);
